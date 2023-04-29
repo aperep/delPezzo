@@ -1,20 +1,18 @@
 from sage.all_cmdline import *   # import sage library
-from sage.geometry.toric_lattice import ToricLatticeElement
-from sage.geometry.cone import ConvexRationalPolyhedralCone, normalize_rays
+from sage.matrix.constructor import matrix
+from sage.matrix.special import diagonal_matrix, identity_matrix
+from sage.rings.rational_field import QQ
+from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice
+from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 
+from typing import Iterable, Sequence
 from dataclasses import dataclass
 import itertools
-#from tqdm import tqdm
 from functools import cached_property
 from collections import Counter
 import re
 
-ic_on = True
-
-def ic(x):
-    if ic_on:
-        print(x)
-    return x
+from icecream import ic
 
 
 def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  cone: ConvexRationalPolyhedralCone) -> bool:
@@ -37,16 +35,17 @@ class Surface:
         L: A Curve object representing the line class from P^2.
         Q: A matrix for the dot product in the Picard group.
         NE: A NE_SubdivisionCone object representing the NE cone.
+        minus_one_curves: a list of all (-1)-curves on the surface
 
     EXAMPLES::
         sage: S = Surface(5)
         sage: cylinders = [c for c in S.all_cylinders(['P1xP1', 'lines', 'tangent'])]
         sage: cone = NE_SubdivisionCone.representative(S,'B(0)'); cone
         1-d cone in 5-d lattice N
-        sage: collection = CylinderCollection(cylinders)
+        sage: collection = CylinderList(cylinders)
         sage: covering = collection.make_polar_on(cone).reduce()
     '''
-    def __init__(self, degree:int, extra:dict[str,str]=None) -> None:
+    def __init__(self, degree:int, extra:dict[str,str]|None=None) -> None:
         '''
             Initializes a Surface object with the given degree and optional extra data.
 
@@ -68,31 +67,42 @@ class Surface:
         blowups = 9  - degree
         self.degree = degree
         self.N = ToricLattice(blowups + 1 )
-        self.K = K = self.N([-3 ] + [1 ]*blowups) # canonical divisor TODO express in L, E
-        E = identity_matrix(QQ, blowups+1 )[:,1 :].columns() 
+        self.K = K = self.N([-3] + [1]*blowups) # canonical divisor TODO express in L, E
+        E = identity_matrix(QQ, blowups+1 )[:,1:].columns() 
         # E is the set of exceptional curves, so the basis is L, E[0], .. , E[n_blowups-1]
         self.E = [self.N(e) for e in E]
         for e in self.E:
             e.set_immutable()
         self.L = self.Line(self.E)
-        self.Q = diagonal_matrix([1 ] + blowups*[-1 ])
+        self.Q = diagonal_matrix([1] + blowups*[-1])
 
         self.NE = NE_SubdivisionCone.NE(self)
 
 
     def dot(self, a, b):
         return a*self.Q*b
-    
+
+    def _N_to_M(self, ray:ToricLatticeElement)->ToricLatticeElement:
+        M = self.N.dual()
+        return M([r if i==0 else -r for i,r in enumerate(ray)])
+
+    def dual_cone(self, input: ConvexRationalPolyhedralCone | list[ToricLatticeElement]) -> ConvexRationalPolyhedralCone:
+        if isinstance(input, ConvexRationalPolyhedralCone):
+            input = input.rays()
+        return Cone([self._N_to_M(r) for r in input]).dual()
+
+
+        
+
     def gram_matrix(self, rays):
         return matrix([[self.dot(a,b) for a in rays] for b in rays])
 
-    def Line(self,exceptional_curves:list):
-        #print(self.N, self.K, exceptional_curves )
+    def Line(self,exceptional_curves:list['Curve'])-> ToricLatticeElement:
         return self.N([i/3  for i in (-self.K + sum(exceptional_curves))])
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
     @cached_property
-    def minus_one_curves(self):
+    def minus_one_curves(self) -> list['Curve']:
         exceptional_curves = self.E
         lines = [self.L-ei-ej for ei,ej in itertools.combinations(self.E, 2 )]
         conics = [2 *self.L-sum(points) for points in itertools.combinations(self.E, 5 )]
@@ -116,14 +126,14 @@ class Surface:
         '''
         Double intersections, which may coincide in triple ones (then 3 double intersections = 1 triple one)
         '''
-        return [Point({a,b}) for a,b in itertools.combinations(self.minus_one_curves, 2 ) if self.dot(a,b)>0 ]
+        return [Point(frozenset([a,b])) for a,b in itertools.combinations(self.minus_one_curves, 2) if self.dot(a,b)>0 ]
 
     @cached_property    
     def triple_intersections(self): 
         '''
         Possible triple intersections
         '''
-        return [Point({a,b,c}) for a,b,c in itertools.combinations(self.minus_one_curves, 3 ) if self.dot(a,b)*self.dot(b,c)*self.dot(a,c)>0 ]
+        return [Point(frozenset([a,b,c])) for a,b,c in itertools.combinations(self.minus_one_curves, 3 ) if self.dot(a,b)*self.dot(b,c)*self.dot(a,c)>0 ]
 
     @cached_property
     def Ample(self):
@@ -141,7 +151,7 @@ class Surface:
             for subset in self.independent_sets(orthogonals, size-1 ):
                 yield subset + [v]
 
-    def maximal_independent_subsets(self, curves:list, independent_with:list=None):
+    def maximal_independent_subsets(self, curves:list, independent_with:list|None=None):
         '''
         
         EXAMPLES::
@@ -162,8 +172,11 @@ class Surface:
                 yield subset
         for subset in self.maximal_independent_subsets(curves[:-1 ], independent_with=independent_with+[curve]):
             yield subset + [curve]
-        
-    def cylinders(self, E, construction:str) -> 'CylinderList':
+
+    def cone_representative(self, cone_type:str) -> 'NE_SubdivisionCone':
+        return NE_SubdivisionCone.representative(self, cone_type)
+
+    def cylinders(self, E, construction:str) -> Iterable['Cylinder']:
         '''
         S is the studied surface
         E is the list of exceptional curves of a blowdown to P2
@@ -183,7 +196,7 @@ class Surface:
             case 'tangent':
                 if self.degree >= 3 :  
                     for e in E:    
-                        yield Cylinder.make_type_tangent(self, E, e)
+                        yield Cylinder.make_type_tangent(self, E, E_on_conic=[f for f in E if f!=e], E_on_tangent=[e])
             case 'P1xP1': 
                 if self.degree <= 7  and self.degree >= 3 :
                     for Ei,Ej in itertools.permutations(E, int(2 )):
@@ -205,13 +218,19 @@ class Surface:
 class Curve(ToricLatticeElement):
     pass #TODO find a reasonable implementation
     # TODO make immutable    
-    def __mul__(self, other):
-        return Curve(self.S.dot(self, other), self.S)
+    def __init__(self, S:Surface, coordinates:list[int]):
+        super().__init__(coordinates)
+        self.S = S
+
+    def __mul__(self, other:'Curve') -> int:
+        product = self.S._N_to_M(other) * self
+        return product
 
 
 @dataclass(frozen=True)
 class Point:
     curves : frozenset[Curve]
+    # TODO define a proper equality
 
 @dataclass(frozen=True)
 class Cylinder:
@@ -221,43 +240,39 @@ class Cylinder:
     support is the list of (-1)-curves lying in the support of divisors, where the cylinders' union is polar
     '''
     S : Surface
-    construction: str
+    construction: str|None
     complement : tuple[Curve]
     support : tuple[Curve]
-    fiber: Curve = None
-    basepoint: Point = None
+    fiber: Curve|None = None
+    basepoint: Point|None = None
+    transversal: bool|None = None
 
     @classmethod
-    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve=None, basepoint:Point=None, construction=None) -> 'Cylinder':
+    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve|None=None, basepoint:Point|None=None, construction:str|None=None, transversal:bool|None=None) -> 'Cylinder':
         for c in complement:
             c.set_immutable()
         for c in support:
             c.set_immutable()
         if fiber!=None:
             fiber.set_immutable()    
-        return cls(S, construction, tuple(complement), tuple(support), fiber, basepoint)
+        return cls(S, construction, tuple(complement), tuple(support), fiber, basepoint, transversal)
 
     @classmethod
     def make_type_lines(cls, S:Surface, E:list[Curve], e:Curve)->'Cylinder':
         '''
-        See Cheltsov-Park-Won Ex.4.1.2 and Perepechko Ex.5.2. 
-        We draw a conic through all blown up points but one, and a tangent line through the remaining one. 
-        Technically, for each e we obtain a collection of two cylinders for two tangents respectively. 
-        This pair has no common fibers.
+        We draw lines through image of e and image of one of E, for each of E.
         '''
-        #print(S.degree, E[0], E[-1])
         L = S.Line(E)
         complement = E+[L-e-f for f in E if f!=e]
-        return cls.make(S, complement, complement, L-e, construction='lines')
+        return cls.make(S, complement, complement, L-e, construction='lines', transversal=False)
 
     @classmethod
     def make_type_lines2(cls, S:Surface, E:list[Curve], e1:Curve, e2:Curve, e3:Curve, e4:Curve)->'Cylinder':
         '''
         See Perepechko-2013, Section 3.1.
         e1, e2, e3, e4 are distinct members of E.
-        We draw lines L1 through images of e1 and e2 in P2, L2 through images of e3 and e4. Their images provide a pencil of lines, which gives a cylinder.  
+        We draw lines L1 through images of e1 and e2 in P2, L2 through images of e3 and e4. Their images provide a pencil of lines, which gives a cylinder. Other members of E may be assumed to be in different singular fibers.
         '''
-        #print(S.degree, E[0], E[-1])
         others = [e for e in E if e!=e1 and e!=e2 and e!=e3 and e!=e4]
         assert len(others) == len(E)-4 
         L = S.Line(E)
@@ -265,30 +280,59 @@ class Cylinder:
         for l in lines:
             l.set_immutable()
         complement = E + [L-e1-e2, L-e3-e4] + [L-e for e in others]
-        return cls.make(S, complement, complement, L, basepoint=Point(frozenset(lines)), construction='lines2')
+        return cls.make(S, complement, complement, L, basepoint=Point(frozenset(lines)), construction='lines2', transversal = False)
 
     @classmethod
-    def make_type_tangent(cls, S:Surface, E:list[Curve], e:Curve)->'Cylinder':
+    def make_type_tangent(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve], E_on_tangent:Sequence[Curve], E_on_fibers: Sequence[Sequence[Curve]]|None = None)->'Cylinder':
         '''
         See Cheltsov-Park-Won Ex.4.1.2 and Perepechko Ex.5.2. 
         We draw a conic through all blown up points but one, and a tangent line through the remaining one. 
         Technically, for each e we obtain a collection of two cylinders for two tangents respectively. 
         This pair has no common fibers.
         '''
-        assert S.degree>=3  #TODO check this
+        if E_on_fibers == None:
+            E_on_fibers = []
+        disjoint_subsets_of_E = [set(E_on_conic), set(E_on_tangent)] + [set(E_on_fiber) for E_on_fiber in E_on_fibers]
+        assert len(E) == sum(len(e) for e in disjoint_subsets_of_E) 
+        assert len(E) == len(set.union(*disjoint_subsets_of_E))
         L = S.Line(E)
-        tangent = L - e
-        conic = - S.K - tangent
-        complement = E + [conic]
-        support = E + [conic, tangent]
-        return cls.make(S, complement, support, None, construction='tangent')
+        tangent = L - sum(e for e in E_on_tangent)
+        conic = 2*L - sum(e for e in E_on_conic)
+        support = E + [conic, tangent] + [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
+
+        # checks if there are at least two tangents through a given point. 
+        two_tangents_through_point = len(E_on_tangent)<=1 and all(len(E_on_fiber)<=1 for E_on_fiber in E_on_fibers)<=1
+
+        #fibers containing at least two Ei
+        special_fibers = [E_on_fiber for E_on_fiber in E_on_fibers if len(E_on_fiber)>1]
+
+        # there are at least two tangents such that there is a fiber containing two given points, see CPW Th.6.2.3
+        two_tangents_with_fiber_through_two_points = len(E_on_tangent)==0 and len(special_fibers)<=1 and all(len(E_on_fiber)<=2 for E_on_fiber in special_fibers)
+
+        if two_tangents_through_point or two_tangents_with_fiber_through_two_points:            
+            complement = E + [conic]
+            transversal = True
+        else:
+            complement = support
+            transversal = None
+        return cls.make(S, complement, support, 2*L, construction='tangent', transversal=transversal)
+
+    @classmethod
+    def make_type_tangent2(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve])->'Cylinder':
+        '''
+        See Perepechko-2013 Section 4.1. 
+        We draw a conic through blown up points at E_small and take a generic tangent line. 
+        Technically, we obtain a collection of cylinders with no common fibers.
+        '''
+        assert len(E_on_conic)<=5
+        return cls.make_type_tangent(S, E, E_on_conic, [], [[e] for e in E if e not in E_on_conic])
 
 
     @classmethod
     def make_type_P1xP1(cls, S:Surface, E:list[Curve], Ei,Ej)->'Cylinder':
         '''
-        Cheltsov-Park-Won Example 4.1.6 and Lemma 4.2.2 for contraction of E1..E4, L-E5-E6. See also Perepechko Ex. 5.3.
-        This is again a pair of cylinders without common fibers
+        Cheltsov-Park-Won Example 4.1.6 and Lemma 4.2.2 for contraction of E1..E4, L-E5-E6 in degree 3. See also Perepechko Ex. 5.3.
+        This is again a pair of cylinders without common fibers.
         #TODO can we use it for degree 2?
         '''
         assert S.degree<=7  and S.degree>=3 
@@ -301,18 +345,55 @@ class Cylinder:
         return cls.make(S, complement, support, None, construction='P1xP1')
 
     @classmethod
-    def make_type_cuspcubic(cls, S:Surface, E:list[Curve], E_small:list[Curve])->'Cylinder':
+    def make_type_cuspcubic(cls, S:Surface, E:list[Curve], E_small:Sequence[Curve])->'Cylinder':
         #TODO adapt for degree <=5
         '''
         See Cheltsov-Park-Won Ex.4.1.13 and Th.6.2.2 case 2.
+        C is an anticanonical cuspidal curve, cubic on contraction to P^2 defined by E.
+        We assume that there are at least two such curves (with distinct cusp points).
+        E_small defines the contraction from degree 5.
+        '''
+        assert S.degree >= 2  and S.degree <= 5
+        assert len(E_small) == 4 and all(e in E for e in E_small)
+        L = S.Line(E)
+        C = - S.K
+        M = [2*L-sum(E_small)] + [L-e for e in E_small]        
+        complement = E
+        support = [C] + M + complement
+        fiber = 2*C
+        return cls.make(S, complement, support, fiber, construction='cuspcubic', transversal=True)
+
+
+    @classmethod
+    def make_type_cuspcubic2(cls, S:Surface, E:list[Curve], E_small:Sequence[Curve])->'Cylinder':
+        #TODO adapt for degree <=5
+        '''
+        See Cheltsov-Park-Won Ex.4.1.11.
         '''
         assert S.degree == 2 
         assert len(E_small) == 4 
         L = S.Line(E)
         C = 3 *L-sum(E)
         M = [2 *L-sum(E_small)] + [L-e for e in E_small]
-        complement = [C] + M + E
-        return cls.make(S, E, complement, None, construction='cuspcubic')
+        support = [C] + M + E
+        complement = E
+        return cls.make(S, complement, support, None, construction='cuspcubic')
+
+    @classmethod
+    def make_type_cuspcubic_L12(cls, S:Surface, E:list[Curve], E_on_line:Sequence[Curve])->'Cylinder':
+        '''
+        See Cheltsov-Park-Won Th.6.2.2, Case 2.4
+        '''
+        assert S.degree >= 2 and S.degree <= 7
+        assert len(E_on_line) == 2 and all(e in E for e in E_on_line)
+        E_other = [e for e in E if e not in E_on_line]
+        L = S.Line(E)
+        C = 3 *L-sum(E)
+        L12 = L - sum(E_on_line)
+        F = [L-e for e in E_on_line]
+        complement = E_other + [L12]
+        support = complement + [C] + F
+        return cls.make(S, complement, support, 2*(F[0]+F[1]), construction='cuspcubic')
 
 
     @cached_property
@@ -323,13 +404,40 @@ class Cylinder:
     def Forb(self):
         return Cone(self.complement)
 
-    def is_polar_on(self, cone):
+    def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str):
+        if isinstance(cone, str):
+            cone = NE_SubdivisionCone.representative(self.S, cone)
         return relative_interior_contains_cone(self.Pol, cone)
+    
+    def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
+        '''
+        checks if the collection is H-complete for ample divisor classes H from the relative interior of cone
+        exclude is a cone of divisors to be excluded from completeness check
+        '''
+        intersection = cone.intersection(self.Forb)
+        if not relative_interior_contains_cone(cone, intersection):
+            return True
+        if exclude == None:
+            return False
+        forb_intersection_excluded = all(exclude.contains(ray) for ray in intersection.rays())
+        return forb_intersection_excluded
 
     def is_transversal(self):
-        if hasattr(self, 'transversal') and self.transversal!=None:
-            return self.transversal
+        if self.transversal!=None: 
+            return self.transversal 
         return self.fiber == None
+
+    def compatible_representatives(self, complete=False) -> list[str]:
+        '''
+        returns types of representatives, on which self is polar and, optionally, complete
+        '''
+        types = NE_SubdivisionCone.cone_types(self.S)
+        cones = {t:NE_SubdivisionCone.representative(self.S, t) for t in types}
+        compatible_types = [t for t in types if self.is_polar_on(cones[t])]
+        if complete:
+            compatible_types = [t for t in compatible_types if self.is_complete_on(cones[t])]
+        return compatible_types
+        
     
 
 
@@ -340,7 +448,7 @@ class CylinderList(list):
     complement is the list of (-1)-curves lying in the complement of the cylinders' union
     fiber is the generic fiber class of the collection. If the collection is transversal, then the fiber is empty
     '''
-    def __init__(self, cylinders:list[Cylinder], S:Surface=None) -> None:
+    def __init__(self, cylinders:Iterable[Cylinder], S:Surface|None=None) -> None:
         super().__init__(cylinders)
         if len(self)==0  and S==None:
             raise ValueError('The surface is not defined')
@@ -371,8 +479,9 @@ class CylinderList(list):
         else:
             super().extend(self._validate_cylinder(item) for item in other)
 
-    def _validate_cylinder(self, cylinder) -> None:
+    def _validate_cylinder(self, cylinder) -> Cylinder:
         if not isinstance(cylinder, Cylinder):
+            #print(type(cylinder), cylinder.S)
             raise TypeError(f'{cylinder} is not a Cylinder')
         if cylinder.S != self.S:
             raise ValueError(f'{cylinder} is defined on other surface')
@@ -397,7 +506,7 @@ class CylinderList(list):
         
     @cached_property
     def complement_double_points(self):
-        return [p for p in self.double_intersections if all(p in self.complement)]
+        return [p for p in self.S.double_intersections if all(p in curve for curve in self.complement)]
     
     @cached_property
     def Pol(self):
@@ -477,19 +586,46 @@ class CylinderList(list):
         return collection
 
     def is_transversal(self):
-        if hasattr(self, 'transversal') and self.transversal!=None:
-            return self.transversal
-        return self.fiber == None
+        if any(cyl.transversal == True for cyl in self):
+            return True
+        if self.fiber == None:
+            return True
+        if len(self) == 0:
+            return False
+        basepoint = self[0].basepoint
+        if basepoint == None:
+            return False
+        return any(basepoint != cyl.basepoint for cyl in self[1:])
 
-    def is_generically_flexible_on(self, cone):
+    
+    def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
+        '''
+        checks if the collection is H-complete for ample divisor classes H from the relative interior of cone
+        exclude is a cone of divisors to be excluded from completeness check
+        '''
+        intersection = cone.intersection(self.Forb)
+        if not relative_interior_contains_cone(cone, intersection):
+            return True
+        if exclude == None:
+            return False
+        forb_intersection_excluded = all(exclude.contains(ray) for ray in intersection.rays())
+        return forb_intersection_excluded
+
+
+    def is_generically_flexible_on(self, cone, exclude=None):
         '''
         checks if the collection provides generic flexibility for ample divisors in the provided cone
+        exclude is a cone of divisors to be excluded from completeness check
         '''
         if isinstance(cone, str):
             cone = NE_SubdivisionCone.representative(self.S, cone)
+        if isinstance(exclude, str):
+            exclude = NE_SubdivisionCone.representative(self.S, cone)
         cone = cone.intersection(self.S.Ample)
-        is_polar = relative_interior_contains_cone(self.Pol, cone)
-        is_complete = cone.intersection(self.Forb).dimension() < cone.dimension()
+        if not relative_interior_contains_cone(self.S.Ample, cone):
+            return True
+        is_polar = self.is_polar_on(cone)
+        is_complete = self.is_complete_on(cone, exclude)
         return is_polar and is_complete and self.is_transversal()
     
     def __str__(self) -> str:
@@ -503,65 +639,103 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
 
     @classmethod
     def NE(cls, S:Surface):
-        NE = NE_SubdivisionCone(S.minus_one_curves)
+        NE = cls(S.minus_one_curves)
         NE.S = S
         NE.parent = None
         NE.parent_face = None
+        NE.parent_ray = None
         return NE
         
 
     @classmethod
-    def from_face(cls, parent:'NE_SubdivisionCone', face:ConvexRationalPolyhedralCone):
+    def from_face_and_ray(cls, parent:'NE_SubdivisionCone', face:ConvexRationalPolyhedralCone, ray:ToricLatticeElement):
         assert face.is_face_of(parent)
         assert face != parent
-        rays = list(face.rays())+[parent.central_ray]
+        rays = list(face.rays())+[ray]
         rays = sorted(normalize_rays(rays, parent.S.N))
-        child = NE_SubdivisionCone(rays, lattice=parent.S.N)
+        child = cls(rays, lattice=parent.S.N)
         child.S = parent.S 
         child.parent = parent
         child.parent_face = face
+        child.parent_ray = ray
         return child
     
-
-    @cached_property
-    def central_ray(self):
-        return sum(self.rays())
-
-    def proper_faces(self):
-        for faces_of_dim in self.faces()[:-1 ]:
-            yield from faces_of_dim
-
-    @cached_property
-    def _children_dict(self):
-        '''
-        returns a dict of subdivision cones indexed by faces
-        '''
-        return {f:NE_SubdivisionCone.from_face(self, f) for f in self.proper_faces()}
-
-    def children(self)->list['NE_SubdivisionCone']:
-        '''
-        returns a list of subdivision cones
-        '''
-        return list(self._children_dict.values())
     
-    def get_face_key(self, face):
-        for f in self._children_dict.keys():
-            if f.is_equivalent(face):
-                return f
-        else:
-            raise ValueError('get_face_key: face is not found in faces of this cone')
+    def subdivision_faces(self, ray: ToricLatticeElement) -> Iterable[ConvexRationalPolyhedralCone]:
+        '''
+        returns faces of self that do not contain ray
+        '''
+        for faces_of_dim in self.faces()[:-1]:
+            for face in faces_of_dim:       # type: ignore
+                if not face.contains(ray):  # type: ignore
+                    yield face              # type: ignore
+        
+    def _subdivision_ray(self) -> ToricLatticeElement:
+        '''
+        returns the standard dividing ray of the cone depending on its type
+        '''
+        match self.type:
+            case 'NE':
+                return -self.S.K
+            case 'C':
+                return sum(self.parent_face.rays())
+            case _:
+                return sum(self.rays())
 
 
-    def get_child(self, face:Cone)->'NE_SubdivisionCone':
+    def children(self, subdivision_ray: ToricLatticeElement | None = None)->Iterable['NE_SubdivisionCone']:
+        '''
+        returns a generator of subdivision cones
+        '''
+        if subdivision_ray == None:
+            subdivision_ray = self._subdivision_ray()
+        for f in self.subdivision_faces(subdivision_ray):
+            cone = NE_SubdivisionCone.from_face_and_ray(self, f, subdivision_ray)
+            if not relative_interior_contains_cone(self, cone):
+                continue
+            yield cone
+
+
+    def ample_children(self, subdivision_ray: ToricLatticeElement | None = None)->Iterable['NE_SubdivisionCone']:
+        '''
+        returns a generator of subdivision cones whose relative interiors contain ample divisors
+        
+        EXAMPLES ::
+        sage: cone_C = next(c for c in Surface(5).NE.ample_children() if c.type == 'C')
+        sage: sorted(Counter(c.type for c in cone_C.ample_children()).items())
+        [('C(0)', 1), ('C(1)', 6), ('C(2)', 12), ('C(3)', 4), ('C(3)-P1xP1', 4)]
+        '''
+        if subdivision_ray == None:
+            subdivision_ray = self._subdivision_ray()
+        ray_is_ample = self.S.Ample.relative_interior_contains(subdivision_ray)
+        for cone in self.children(subdivision_ray):
+            if ray_is_ample or cone.has_ample_divisors():
+                yield cone
+            
+
+
+    def make_child(self, face:ConvexRationalPolyhedralCone, subdivision_ray: ToricLatticeElement | None = None)->'NE_SubdivisionCone':
         '''
         returns a subdivision cone corresponding to the given face
         '''
-        if face in self._children_dict.keys():
-            return self._children_dict[face]
+        # TODO convert ValueErrors into return None
+        if subdivision_ray == None:
+            subdivision_ray = self._subdivision_ray()
+        if not self.contains(subdivision_ray):
+            raise ValueError(f'make_child: subdivision_ray {subdivision_ray} is not contained in this cone ({self} with rays {list(self.rays())}) of type {self.type}')
         if not face.is_face_of(self):
-            raise ValueError('get_child: face is not a face of this cone')
-        return self._children_dict[self.get_face_key(face)]
+            raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
+        cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
+        if not relative_interior_contains_cone(self, cone):
+            raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
+        return cone
+        # should we check for containing ample divisors? maybe not 
 
+    def print(self):
+        info = f'Cone of type {self.type}, rays\n{self.rays()}, on {self.S}'
+        if self.parent != None:
+            info +=f' with parent of type {self.parent.type}, parent ray {self.parent_ray}, parent face rays {list(self.parent.rays())}.'
+        return info
         
     
 
@@ -573,10 +747,13 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         returns a cone, which relative interior consists of all ample classes in self.cone
         '''
         ample = self.intersection(self.S.Ample)
-        if self.S.Ample.interior_contains(sum(ample.rays())):
+        if self.S.Ample.relative_interior_contains(sum(ample.rays())):
             return ample
         else:
             return Cone([],lattice=self.S.N)
+        
+    def has_ample_divisors(self):
+        return self.Ample.dimension() > 0
         
     @cached_property
     def type(self):
@@ -584,7 +761,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         Returns the Fujita type of the parent face for children of NE.
         EXAMPLES::
             sage: from collections import Counter
-            sage: Counter(c.type for c in Surface(4).NE.children()).most_common()
+            sage: Counter(c.type for c in Surface(4).NE.ample_children()).most_common()
             [('B(3)', 160),
             ('B(2)', 80),
             ('B(4)', 80),
@@ -597,88 +774,95 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         rank = self.dim() - 1 
         if self == self.S.NE:
             return 'NE'
-        elif self.parent == self.S.NE:
+        elif self.parent == self.S.NE and self.parent_ray == -self.S.K:
             rays = list(self.parent_face.rays())
-            if all(self.S.dot(r,s)<=0  for r in rays for s in rays) and                 all(self.S.dot(r,r)==-1  for r in rays):
+            if not all(r in self.S.minus_one_curves for r in rays):
+                return 'NE.unknown-child-1'
+            E = next(self.S.maximal_independent_subsets(rays))
+            if len(E) == len(rays):
                 res = f'B({rank})'
-                disjoint = self.S.curves_not_meeting(self.S.minus_one_curves, rays)
-                if rank == 9 -self.S.degree-1  and len(disjoint)==0 :
+                other_disjoint_curves = self.S.curves_not_meeting(self.S.minus_one_curves, rays)
+                if rank == 9 - self.S.degree - 1 and len(other_disjoint_curves)==0:
                     res+='-P1xP1'
                 return res
-            # below is not a complete check for type C. Do we need one?
-            e1 = next(self.S.maximal_independent_subsets(rays))
-            meeting_curves = [[r for  r in rays if self.S.dot(r,e)==1 ] for e in e1]
-            if all(len(curves)==1  for curves in meeting_curves):
+            # below is not a complete check for type C. Do we need one? yes!
+            meeting_curves = [[r for  r in rays if self.S.dot(r,e)==1 ] for e in E]
+            if not all(len(curves)==1  for curves in meeting_curves):
+                return 'NE.unknown-child-2'
+            E1 = [curves[0] for curves in meeting_curves]
+            B = E[0]+E1[0]
+            if all(E[i]+E1[i]==B for i in range(len(E))) and \
+                all(self.S.dot(e1,e2)<=0 for e1 in E1 for e2 in E1) and len(E)==rank-1:
                 return 'C'
-        return self.parent.type + '-unknown-child'
+            return 'NE.unknown-child-3'
+        elif self.parent.type == 'C' and self.parent_ray == self.parent._subdivision_ray():
+            rays = list(self.parent_face.rays())
+            B = self.parent_ray
+            E = [r for r in rays if r in self.S.minus_one_curves]
+            has_anticanonical_ray = -self.S.K in rays
+            if len(rays) - len(E) != 1 if has_anticanonical_ray else 0:
+                print(rays, E, B, rank)
+                return 'C.unknown-child-6'
+            if not all(self.S.dot(e1,e2)<=0 for e1 in E for e2 in E):
+                return 'C.unknown-child-4'
+            if not all(self.S.dot(B,e)==0 for e in E):
+                return 'C.unknown-child-5'
+            cone_type = f'C({len(E)})'
+            if len(E) == len(self.S.E) - 1:
+                if all(any(self.S.dot(c,e)!=0 for e in E) for c in self.S.minus_one_curves):
+                    cone_type += '-P1xP1'
+            if not has_anticanonical_ray:
+                cone_type += '-no-K'
+            return cone_type
+        return self.parent.type + '.unknown-child-0'
 
     @classmethod
     def representative(cls, S:Surface, cone_type:str):
-        if cone_type=='NE':
-            return S.NE
-        elif cone_type[0 ]=='B':
-            num_rays = int(re.search(r'\d+', cone_type).group())
-            if 'P1xP1' not in cone_type:
+        parent = S.NE
+        match list(cone_type):
+            case ['N','E']:
+                return S.NE
+            case ('B','(', num_rays, ')'):
+                num_rays = int(num_rays)
+                assert num_rays == int(re.search(r'\d+', cone_type).group()) # type: ignore
                 face_rays = S.E[:num_rays]
-            else:
-                assert len(S.E) == num_rays+1 
-                face_rays = S.E[:-2 ]+[S.L - S.E[-1 ] - S.E[-2 ]]
-        elif cone_type[0 ]=='C':
-            face_rays = S.E[:-1 ] + [S.L - e - S.E[-1 ] for e in S.E[:-1 ]]
-        else:
-            raise ValueError('unknown cone type', cone_type)
+            case ['C']:
+                face_rays = S.E[:-1 ] + [S.L - e - S.E[-1 ] for e in S.E[:-1 ]]
+            case ('C','(', num_rays, ')'):
+                num_rays = int(num_rays)
+                assert num_rays < 9 - S.degree
+                face_rays = S.E[:num_rays] + [-S.K]
+                parent = NE_SubdivisionCone.representative(S, 'C')
+            case ('C','(', num_rays, ')', '-','n','o','-','K'):
+                num_rays = int(num_rays)
+                assert num_rays < 9 - S.degree
+                face_rays = S.E[:num_rays]
+                parent = NE_SubdivisionCone.representative(S, 'C')
+            case _:
+                num_rays = len(S.E) - 1
+                if cone_type == f'B({num_rays})-P1xP1':
+                    face_rays = S.E[:-2]+[S.L - S.E[-1] - S.E[-2]]
+                elif cone_type == f'C({num_rays})-P1xP1':
+                    face_rays = S.E[:-2] + [S.L - S.E[-1] - S.E[-2]] + [-S.K]
+                    parent = NE_SubdivisionCone.representative(S, 'C')
+                elif cone_type == f'C({num_rays})-P1xP1-no-K':
+                    face_rays = S.E[:-2] + [S.L - S.E[-1] - S.E[-2]]
+                    parent = NE_SubdivisionCone.representative(S, 'C')
+                else:
+                    raise ValueError('unknown cone type', cone_type)
         face_rays = sorted(normalize_rays(face_rays, S.N))
         face = Cone(face_rays, lattice=S.N)
-        return S.NE.get_child(face)
+        return parent.make_child(face)
 
     @staticmethod
     def cone_types(S:Surface):
-        blowups = 9 -S.degree
-        return ['NE', f'B({blowups-1 })-P1xP1', 'C']+            [f'B({i})' for i in range(blowups+1 )]
+        blowups = 9 - S.degree
+        return ['NE', f'B({blowups-1 })-P1xP1', f'C({blowups-1 })-P1xP1', 'C']+            [f'B({i})' for i in range(blowups+1 )] + [f'C({i})' for i in range(blowups)]
+        #removed:  [f'C({blowups-1 })-P1xP1-no-K']+ [f'C({i})-no-K' for i in range(blowups)]
 
     @classmethod
     def representatives(cls,S:Surface):
         for cone_type in cls.cone_types(S):
             yield cls.representative(S, cone_type)
 
-
-def test_S5_covering():
-    S = Surface(5)
-    constructions = ['P1xP1', 'lines', 'tangent', 'lines2']
-    cylinders = [c for c in S.all_cylinders(constructions)]
-    total_collection = CylinderList(cylinders)
-    cones = [c for c in NE_SubdivisionCone.representatives(S)]
-    cone = NE_SubdivisionCone.representative(S,'B(0)')
-    collection = CylinderList(cylinders)
-    covering = collection.make_polar_on(cones[1 ]).reduce()
-    assert len(covering) == 5 
-    return covering
-
-def test_cone_types():
-    S = Surface(3)
-    types = NE_SubdivisionCone.cone_types(S)
-    for t in types:
-        assert t == NE_SubdivisionCone.representative(S,t).type
-
-
-def test_S3_tangent_covering():
-    S = Surface(3)
-    collection = CylinderList(S.cylinders(S.E, 'tangent'))
-    for i in range(1, 7):
-        t = f'B({i})'
-        cone = NE_SubdivisionCone.representative(S, t)
-        assert len(collection.make_polar_on(cone).reduce())>0 
-    cone = NE_SubdivisionCone.representative(S, 'B(0)')
-    assert len(collection.make_polar_on(cone).reduce())==0 
-
-if __name__=="__main__":
-    S = Surface(3 )
-    #constructions = ['P1xP1', 'lines', 'tangent']
-    #cylinders = [c for c in tqdm(S.all_cylinders(constructions))]
-    #total_collection = CylinderCollection(cylinders)
-    #cones = [c for c in NE_SubdivisionCone.representatives(S)]
-    #cone = NE_SubdivisionCone.representative(S,'B(0)')
-    #collection = CylinderCollection(cylinders)
-    #covering = collection.make_polar_on(cones[1]).reduce()
-    cyl = next(S.all_cylinders(['tangent']))
 
