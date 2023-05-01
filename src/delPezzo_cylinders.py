@@ -13,7 +13,7 @@ from collections import Counter
 import re
 
 from icecream import ic
-
+ic.disable()
 
 def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  cone: ConvexRationalPolyhedralCone) -> bool:
     '''
@@ -22,6 +22,11 @@ def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  co
     contains_rays = all(supercone.contains(ray) for ray in cone.rays()) 
     relative_interiors_intersect = supercone.relative_interior_contains(sum(cone.rays()))
     return contains_rays and relative_interiors_intersect
+
+def cones_intersect_by_relint(cone1: ConvexRationalPolyhedralCone, cone2: ConvexRationalPolyhedralCone) -> bool:
+    intersection = cone1.intersection(cone2)
+    interior_ray = sum(intersection.rays())
+    return cone1.relative_interior_contains(interior_ray) and cone2.relative_interior_contains(interior_ray)
 
 class Surface: 
     r'''
@@ -137,7 +142,7 @@ class Surface:
 
     @cached_property
     def Ample(self):
-        return Cone([self.N(self.Q*ray) for ray in self.NE.dual().rays()])
+        return self.dual_cone(self.NE)
 
     def independent_sets(self, curves, size = None):
         if size == None:
@@ -427,18 +432,19 @@ class Cylinder:
             return self.transversal 
         return self.fiber == None
 
-    def compatible_representatives(self, complete=False) -> list[str]:
+    def compatible_representatives(self, complete=False) -> Iterable[str]:
         '''
-        returns types of representatives, on which self is polar and, optionally, complete
+        yields types of representatives, on which self is polar and, optionally, complete
         '''
         types = NE_SubdivisionCone.cone_types(self.S)
-        cones = {t:NE_SubdivisionCone.representative(self.S, t) for t in types}
-        compatible_types = [t for t in types if self.is_polar_on(cones[t])]
-        if complete:
-            compatible_types = [t for t in compatible_types if self.is_complete_on(cones[t])]
-        return compatible_types
-        
-    
+        for t in types:
+            print(f'looking at type {t}')
+            cone = NE_SubdivisionCone.representative(self.S, t)
+            if self.is_polar_on(cone):
+                if complete and not self.is_complete_on(cone):
+                    continue
+                yield t
+
 
 
 class CylinderList(list):
@@ -726,8 +732,10 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         if not face.is_face_of(self):
             raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
         cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
+        ic(cone)
         if not relative_interior_contains_cone(self, cone):
             raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
+        ic('returning cone')
         return cone
         # should we check for containing ample divisors? maybe not 
 
@@ -819,6 +827,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
     @classmethod
     def representative(cls, S:Surface, cone_type:str):
         parent = S.NE
+        ic(cone_type)
         match list(cone_type):
             case ['N','E']:
                 return S.NE
