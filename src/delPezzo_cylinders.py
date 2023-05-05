@@ -12,8 +12,8 @@ from functools import cached_property
 from collections import Counter
 import re
 
-from icecream import ic
-ic.disable()
+#from icecream import ic
+#ic.disable()
 
 def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  cone: ConvexRationalPolyhedralCone) -> bool:
     '''
@@ -351,10 +351,9 @@ class Cylinder:
 
     @classmethod
     def make_type_cuspcubic(cls, S:Surface, E:list[Curve], E_small:Sequence[Curve])->'Cylinder':
-        #TODO adapt for degree <=5
         '''
         See Cheltsov-Park-Won Ex.4.1.13 and Th.6.2.2 case 2.
-        C is an anticanonical cuspidal curve, cubic on contraction to P^2 defined by E.
+        C is an anticanonical cuspidal curve, cubic on contraction to P^2 defined by (E minus E_small) and M.
         We assume that there are at least two such curves (with distinct cusp points).
         E_small defines the contraction from degree 5.
         '''
@@ -363,7 +362,7 @@ class Cylinder:
         L = S.Line(E)
         C = - S.K
         M = [2*L-sum(E_small)] + [L-e for e in E_small]        
-        complement = E
+        complement = E # maybe [e for e in E if e not in E_small] ?
         support = [C] + M + complement
         fiber = 2*C
         return cls.make(S, complement, support, fiber, construction='cuspcubic', transversal=True)
@@ -438,7 +437,7 @@ class Cylinder:
         '''
         types = NE_SubdivisionCone.cone_types(self.S)
         for t in types:
-            print(f'looking at type {t}')
+            #print(f'looking at type {t}')
             cone = NE_SubdivisionCone.representative(self.S, t)
             if self.is_polar_on(cone):
                 if complete and not self.is_complete_on(cone):
@@ -732,10 +731,8 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         if not face.is_face_of(self):
             raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
         cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
-        ic(cone)
         if not relative_interior_contains_cone(self, cone):
             raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
-        ic('returning cone')
         return cone
         # should we check for containing ample divisors? maybe not 
 
@@ -827,7 +824,6 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
     @classmethod
     def representative(cls, S:Surface, cone_type:str):
         parent = S.NE
-        ic(cone_type)
         match list(cone_type):
             case ['N','E']:
                 return S.NE
