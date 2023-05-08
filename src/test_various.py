@@ -40,5 +40,5 @@ def test_S3_cover_anticanonical():
 
 
 if __name__=="__main__":
-    S = Surface(3 )
+    S = Surface(3)
 

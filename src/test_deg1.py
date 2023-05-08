@@ -5,10 +5,18 @@ from delPezzo_cylinders import Surface, CylinderList, Cylinder, NE_SubdivisionCo
 We follow CPW
 '''
 
-S2 = Surface(2)
 
-def test_deg2_cuspidal():
-    C1 = Cylinder.make_type_cuspcubic(S2, S2.E, S2.E[3:])
+def test_deg1():
+    S1 = Surface(1)
+    E = S1.E
+    L = S1.L
+    C1 = Cylinder.make_type_tangent(S1, E, E[3:], [E[2]], [[e] for e in E[:2]])
+    pol_C1 = E + [2*L-E[0]-E[1], L-E[2], 2*L-sum(E[3:])]
+    for r in pol_C1:
+        r.set_immutable()
+    assert set(pol_C1) == set(C1.Pol.rays())
+    assert CylinderList([C1]).is_generically_flexible_on(C1.Pol)
+    return
     C1_compatible_types = C1.compatible_representatives(complete=True)
     C1_compatible_types_expected = ['B(3)', 'C(3)']
 

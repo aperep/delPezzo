@@ -8,7 +8,7 @@ from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_ray
 from typing import Iterable, Sequence
 from dataclasses import dataclass
 import itertools
-from functools import cached_property
+from functools import cached_property, cache
 from collections import Counter
 import re
 
@@ -140,6 +140,7 @@ class Surface:
         '''
         return [Point(frozenset([a,b,c])) for a,b,c in itertools.combinations(self.minus_one_curves, 3 ) if self.dot(a,b)*self.dot(b,c)*self.dot(a,c)>0 ]
 
+    #TODO refactor module to avoid usage of Ample in favor of NE through dualities. Reason is, NE has 240 rays in degree 1, and Ample has around 20k rays.
     @cached_property
     def Ample(self):
         return self.dual_cone(self.NE)
@@ -290,6 +291,10 @@ class Cylinder:
     @classmethod
     def make_type_tangent(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve], E_on_tangent:Sequence[Curve], E_on_fibers: Sequence[Sequence[Curve]]|None = None)->'Cylinder':
         '''
+        We draw a conic and a tangent on P2, and specify the positions of blown up points.
+
+        
+        Special case:
         See Cheltsov-Park-Won Ex.4.1.2 and Perepechko Ex.5.2. 
         We draw a conic through all blown up points but one, and a tangent line through the remaining one. 
         Technically, for each e we obtain a collection of two cylinders for two tangents respectively. 
@@ -362,7 +367,7 @@ class Cylinder:
         L = S.Line(E)
         C = - S.K
         M = [2*L-sum(E_small)] + [L-e for e in E_small]        
-        complement = E # maybe [e for e in E if e not in E_small] ?
+        complement =  [e for e in E if e not in E_small] 
         support = [C] + M + complement
         fiber = 2*C
         return cls.make(S, complement, support, fiber, construction='cuspcubic', transversal=True)
@@ -617,7 +622,7 @@ class CylinderList(list):
         return forb_intersection_excluded
 
 
-    def is_generically_flexible_on(self, cone, exclude=None):
+    def is_generically_flexible_on(self, cone, exclude=None, restrict_to_ample=True):
         '''
         checks if the collection provides generic flexibility for ample divisors in the provided cone
         exclude is a cone of divisors to be excluded from completeness check
@@ -626,9 +631,10 @@ class CylinderList(list):
             cone = NE_SubdivisionCone.representative(self.S, cone)
         if isinstance(exclude, str):
             exclude = NE_SubdivisionCone.representative(self.S, cone)
-        cone = cone.intersection(self.S.Ample)
-        if not relative_interior_contains_cone(self.S.Ample, cone):
-            return True
+        if restrict_to_ample:
+            cone = cone.intersection(self.S.Ample)
+            if not relative_interior_contains_cone(self.S.Ample, cone):
+                return True
         is_polar = self.is_polar_on(cone)
         is_complete = self.is_complete_on(cone, exclude)
         return is_polar and is_complete and self.is_transversal()
@@ -756,7 +762,12 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             return ample
         else:
             return Cone([],lattice=self.S.N)
-        
+
+    @property 
+    def Ample2(self): # is this faster than Ample?
+        dual_rays = self.S.NE.rays() + self.S.dual_cone(self).rays()
+        return self.S.dual_cone(Cone(dual_rays))
+
     def has_ample_divisors(self):
         return self.Ample.dimension() > 0
         
@@ -821,7 +832,9 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             return cone_type
         return self.parent.type + '.unknown-child-0'
 
-    @classmethod
+    #this method works slowly in degree 1, why?
+    @classmethod 
+    @cache 
     def representative(cls, S:Surface, cone_type:str):
         parent = S.NE
         match list(cone_type):
@@ -870,4 +883,10 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         for cone_type in cls.cone_types(S):
             yield cls.representative(S, cone_type)
 
+    def relative_volume(self, cone:ConvexRationalPolyhedralCone) -> Rational:
+        '''
+        given a subcone of self, computes the intersection with an affine hyperplane orthogonal to -K and returns the volume of the subcone divided by the volume of self
+        '''
+        # see https://doc.sagemath.org/html/en/reference/discrete_geometry/sage/geometry/polyhedron/base7.html#sage.geometry.polyhedron.base7.Polyhedron_base7.volume
+        raise NotImplementedError
 
