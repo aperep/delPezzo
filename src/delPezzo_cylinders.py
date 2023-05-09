@@ -50,7 +50,7 @@ class Surface:
         sage: collection = CylinderList(cylinders)
         sage: covering = collection.make_polar_on(cone).reduce()
     '''
-    def __init__(self, degree:int, extra:dict[str,str]|None=None) -> None:
+    def __init__(self, degree:int, collinear_triples:list[list[int]]|None=None, infinitesimal_chains:list[list[int]]|None=None, sixs_on_conic:list[list[int]]|None=None, cusp_cubics:list[int]|None=None, extra:dict[str,str]|None=None) -> None:
         '''
             Initializes a Surface object with the given degree and optional extra data.
 
@@ -58,6 +58,12 @@ class Surface:
             degree: An integer between 1 and 9, inclusive, representing the degree of the del Pezzo surface.
             extra: Optional data to be used in the initialization of non-generic surfaces. The following keys are supported:
             - 'tacnodal_curves': An even integer between 0 and 24, inclusive, representing the number of tacnodal curves. Can be used for the surfaces of degree 2, defaults to zero.
+            
+            For the following optional parameters note that numeration of points starts from 0.
+            collinear_triples: indices of triples of collinear blown up points.
+            infinitesimal_chains: indices of chains of infinitely near blown up points. The next point in the chain is blown up infinitely near to the previous one. 
+            sixs_on_conic: six-tuples of indices for six points on a conic if present.
+            cusp_cubics: list of indices i for each cuspidal cubic 3*L-E_0-...-E_7-E_i in degree 1 
         '''
         if degree<1  or degree>9 :
             raise ValueError("degree must be between 1 and 9")
@@ -69,6 +75,11 @@ class Surface:
                 self.tacnodal_curves = int(extra['tacnodal_curves'])
             else:
                 self.tacnodal_curves = 0 
+        self.collinear_triples = collinear_triples if  collinear_triples!=None else []
+        self.infinitesimal_chains = infinitesimal_chains if  infinitesimal_chains!=None else []
+        self.sixs_on_conic = sixs_on_conic if sixs_on_conic!=None else []
+        self.cusp_cubics = cusp_cubics if cusp_cubics!=None else []
+        self.is_weak = len(self.collinear_triples)+len(self.infinitesimal_chains)+len(self.sixs_on_conic)+len(self.cusp_cubics)>0
         blowups = 9  - degree
         self.degree = degree
         self.N = ToricLattice(blowups + 1 )
@@ -107,6 +118,17 @@ class Surface:
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
     @cached_property
+    def minus_two_curves(self) -> list['Curve']:
+        collinear = [self.L - self.E[i] - self.E[j] - self.E[k] for i,j,k in self.collinear_triples]
+        infinitesimal = [self.E[chain[i]]-self.E[chain[i+1]] for chain in self.infinitesimal_chains for i in range(len(chain)-1)]
+        conic = [2*self.L - sum(self.E[i] for i in six) for six in self.sixs_on_conic]
+        cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.cusp_cubics]
+        curves = collinear + infinitesimal + conic + cubic
+        curves = normalize_rays(curves, self.N)
+        return curves
+
+
+    @cached_property
     def minus_one_curves(self) -> list['Curve']:
         exceptional_curves = self.E
         lines = [self.L-ei-ej for ei,ej in itertools.combinations(self.E, 2 )]
@@ -121,6 +143,8 @@ class Surface:
         #for c in curves:
          #   c.set_immutable()
         curves = normalize_rays(curves, self.N)
+        if self.is_weak:
+            curves = [c for c in curves if all(self.dot(c,f)>=0 for f in self.minus_two_curves)]
         return curves
         
     def curves_not_meeting(self, curves_to_filter, test_curves):
@@ -650,7 +674,11 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
 
     @classmethod
     def NE(cls, S:Surface):
-        NE = cls(S.minus_one_curves)
+        if S.is_weak:
+            curves = S.minus_one_curves + S.minus_two_curves
+        else:
+            curves = S.minus_one_curves
+        NE = cls(curves)
         NE.S = S
         NE.parent = None
         NE.parent_face = None
@@ -757,6 +785,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         '''
         returns a cone, which relative interior consists of all ample classes in self.cone
         '''
+        #TODO we assume that L is in NE, make this explicit
         ample = self.intersection(self.S.Ample)
         if self.S.Ample.relative_interior_contains(sum(ample.rays())):
             return ample
