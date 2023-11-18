@@ -72,6 +72,8 @@ class Surface:
         
         if extra == None:
             extra = dict()
+
+
         if degree == 2 :
             if 'tacnodal_curves' in extra.keys():
                 self.tacnodal_curves = int(extra['tacnodal_curves'])
@@ -84,6 +86,8 @@ class Surface:
         self.is_weak = len(self.collinear_triples)+len(self.infinitesimal_chains)+len(self.sixs_on_conic)+len(self.cusp_cubics)>0
         blowups = 9  - degree
         self.degree = degree
+        self.check_point_configuration()
+
         self.N = ToricLattice(blowups + 1 )
         self.K = K = self.N([-3] + [1]*blowups) # canonical divisor TODO express in L, E
         E = identity_matrix(QQ, blowups+1 )[:,1:].columns() 
@@ -95,6 +99,31 @@ class Surface:
         self.Q = diagonal_matrix([1] + blowups*[-1])
 
         self.NE = NE_SubdivisionCone.NE(self)
+
+    def check_point_configuration(self):
+        for triple in self.collinear_triples:
+            assert len(triple) == 3
+            assert len(set(triple)) == 3
+            assert set(triple) in range(9-self.degree)
+
+
+        # two lines intersect only by one point
+        for triple1, triple2 in itertools.combinations(self.collinear_triples, 2):
+            assert len(set(triple1).intersection(set(triple2)))<=1
+
+        assert set(i for triple in self.collinear_triples for i in triple) in range(9-self.degree)
+        
+        # chains do not have duplicate entries
+        assert len(set(i for chain in self.infinitesimal_chains for i in chain)) == sum(len(chain) for chain in self.infinitesimal_chains) 
+        
+        # line can contain only a prefix sublist of a chain
+        for triple in self.collinear_triples:
+            for chain in self.infinitesimal_chains:
+                intersection = [i for i in chain if i in triple]
+                assert all(intersection[i] == chain[i] for i in range(len(intersection)))
+
+        if self.degree<=3:
+            raise NotImplementedError
 
 
     def dot(self, a, b):
