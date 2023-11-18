@@ -15,7 +15,9 @@ import re
 #from icecream import ic
 #ic.disable()
 
-def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  cone: ConvexRationalPolyhedralCone) -> bool:
+#TODO make relint a class (dumb class over cone with set operators)
+
+def relint_contains_relint(supercone: ConvexRationalPolyhedralCone,  cone: ConvexRationalPolyhedralCone) -> bool:
     '''
     checks if the relative interior of supercone contains the relative interior of cone
     '''
@@ -23,7 +25,7 @@ def relative_interior_contains_cone(supercone: ConvexRationalPolyhedralCone,  co
     relative_interiors_intersect = supercone.relative_interior_contains(sum(cone.rays()))
     return contains_rays and relative_interiors_intersect
 
-def cones_intersect_by_relint(cone1: ConvexRationalPolyhedralCone, cone2: ConvexRationalPolyhedralCone) -> bool:
+def relints_intersect(cone1: ConvexRationalPolyhedralCone, cone2: ConvexRationalPolyhedralCone) -> bool:
     intersection = cone1.intersection(cone2)
     interior_ray = sum(intersection.rays())
     return cone1.relative_interior_contains(interior_ray) and cone2.relative_interior_contains(interior_ray)
@@ -440,7 +442,7 @@ class Cylinder:
     def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str):
         if isinstance(cone, str):
             cone = NE_SubdivisionCone.representative(self.S, cone)
-        return relative_interior_contains_cone(self.Pol, cone)
+        return relint_contains_relint(self.Pol, cone)
     
     def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
         '''
@@ -448,7 +450,7 @@ class Cylinder:
         exclude is a cone of divisors to be excluded from completeness check
         '''
         intersection = cone.intersection(self.Forb)
-        if not relative_interior_contains_cone(cone, intersection):
+        if not relint_contains_relint(cone, intersection):
             return True
         if exclude == None:
             return False
@@ -566,7 +568,7 @@ class CylinderList(list):
         '''
         if isinstance(cone, str):
             cone = NE_SubdivisionCone.representative(self.S, cone)
-        return relative_interior_contains_cone(self.Pol, cone)
+        return relint_contains_relint(self.Pol, cone)
 
     def make_polar_on(self, cone) -> 'CylinderList':
         '''
@@ -638,7 +640,7 @@ class CylinderList(list):
         exclude is a cone of divisors to be excluded from completeness check
         '''
         intersection = cone.intersection(self.Forb)
-        if not relative_interior_contains_cone(cone, intersection):
+        if not relint_contains_relint(cone, intersection):
             return True
         if exclude == None:
             return False
@@ -657,7 +659,7 @@ class CylinderList(list):
             exclude = NE_SubdivisionCone.representative(self.S, cone)
         if restrict_to_ample:
             cone = cone.intersection(self.S.Ample)
-            if not relative_interior_contains_cone(self.S.Ample, cone):
+            if not relint_contains_relint(self.S.Ample, cone):
                 return True
         is_polar = self.is_polar_on(cone)
         is_complete = self.is_complete_on(cone, exclude)
@@ -730,7 +732,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             subdivision_ray = self._subdivision_ray()
         for f in self.subdivision_faces(subdivision_ray):
             cone = NE_SubdivisionCone.from_face_and_ray(self, f, subdivision_ray)
-            if not relative_interior_contains_cone(self, cone):
+            if not relint_contains_relint(self, cone):
                 continue
             yield cone
 
@@ -765,7 +767,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         if not face.is_face_of(self):
             raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
         cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
-        if not relative_interior_contains_cone(self, cone):
+        if not relint_contains_relint(self, cone):
             raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
         return cone
         # should we check for containing ample divisors? maybe not 

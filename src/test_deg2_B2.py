@@ -2,7 +2,7 @@ from sage.geometry.cone import Cone
 from sage.geometry.polyhedron.constructor import Polyhedron
 import tikzplotlib
 
-from delPezzo_cylinders import Surface, Cylinder, NE_SubdivisionCone, cones_intersect_by_relint
+from delPezzo_cylinders import Surface, Cylinder, NE_SubdivisionCone, relints_intersect
 
 
 S2 = Surface(2)
@@ -42,7 +42,7 @@ def polar_subset_on_B2(S:Surface, cone):
     P = polyhedron_to_square(P)
     if P.is_empty():
         return Polyhedron(vertices=[(0,0)])
-    if cones_intersect_by_relint(cone, B2_cone):
+    if relints_intersect(cone, B2_cone):
         return P
     return Polyhedron(vertices=[(0,0)])
 
