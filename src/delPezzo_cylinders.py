@@ -101,29 +101,82 @@ class Surface:
         self.NE = NE_SubdivisionCone.NE(self)
 
     def check_point_configuration(self):
-        for triple in self.collinear_triples:
+        if not self.__class__._check_points_lines_and_chains(self.collinear_triples, self.infinitesimal_chains, self.degree):
+            return False
+
+    @classmethod
+    def _check_points_lines_and_chains(cls, triples, chains, degree):
+        for triple in triples:
             assert len(triple) == 3
             assert len(set(triple)) == 3
-            assert set(triple) in range(9-self.degree)
-
+            assert set(triple) in range(9-degree)
 
         # two lines intersect only by one point
-        for triple1, triple2 in itertools.combinations(self.collinear_triples, 2):
+        for triple1, triple2 in itertools.combinations(triples, 2):
             assert len(set(triple1).intersection(set(triple2)))<=1
 
-        assert set(i for triple in self.collinear_triples for i in triple) in range(9-self.degree)
+        assert set(i for triple in triples for i in triple) in range(9-degree)
         
         # chains do not have duplicate entries
-        assert len(set(i for chain in self.infinitesimal_chains for i in chain)) == sum(len(chain) for chain in self.infinitesimal_chains) 
+        assert len(set(i for chain in chains for i in chain)) == sum(len(chain) for chain in chains) 
         
         # line can contain only a prefix sublist of a chain
-        for triple in self.collinear_triples:
-            for chain in self.infinitesimal_chains:
-                intersection = [i for i in chain if i in triple]
-                assert all(intersection[i] == chain[i] for i in range(len(intersection)))
-
-        if self.degree<=3:
+        for triple in triples:
+            for chain in chains:
+                cls._point_line_and_chain_align(triple, chain)
+        if degree<=3:
             raise NotImplementedError
+
+    @classmethod
+    def _point_line_and_chain_align(cls, triple, chain):
+        intersection = [i for i in chain if i in triple]
+        return all(intersection[i] == chain[i] for i in range(len(intersection)))
+
+    def blowups(self):
+        if self.degree<=4:
+            raise NotImplementedError
+        p = 9-self.degree
+        
+        cls = self.__class__
+        #lines = [line for line in lines if all(cls._point_line_and_chain_align(line, chain) for chain in self.infinitesimal_chains)]
+        
+        #listing all possibilities for infinitesimal_chains after adding a new point
+        new_chains_variants = [self.infinitesimal_chains]
+        for i in range(len(self.infinitesimal_chains)):
+            new_chain = self.infinitesimal_chains[i] + [p]
+            if all(cls._point_line_and_chain_align(line, new_chain)==False for line in self.collinear_triples):
+                new_chains_variants.append(self.infinitesimal_chains[:i] + [new_chain] + self.infinitesimal_chains[i+1:])
+        union_of_chains = [i for chain in self.infinitesimal_chains for i in chain]
+        for i in range(9-self.degree):
+            if i in union_of_chains:
+                continue
+            new_chain = [[i,p]]
+            if all(cls._point_line_and_chain_align(line, new_chain)==False for line in self.collinear_triples):
+                new_chains_variants.append(self.infinitesimal_chains+new_chain)
+
+
+        # pairs of points which are not contained in an existing line
+        candidate_pairs = [[i,j] for i,j in itertools.combinations(range(9-self.degree),2)  
+                        if all(i not in line or j not in line for line in self.collinear_triples)]
+        for chains in new_chains_variants:
+            # pairs i,j such that a new line (i,j,p) is ok with chains
+            pairs = [pair for pair in candidate_pairs if all(cls._point_line_and_chain_align(pair+[p], chain) for chain in chains)]
+            # choose disjoint subsets of pairs so that lines do not coincide
+            pair_sets = itertools.chain.from_iterable(itertools.combinations(pairs,r) for r in range(len(pairs)+1))
+            for pair_set in pair_sets:
+                if all(set(a).isdisjoint(b) for a,b in itertools.combinations(pair_set,2)): # if pair_set is disjoint
+                    chosen_lines = [pair+[p] for pair in pair_set]
+                    yield Surface(self.degree-1, collinear_triples=self.collinear_triples+chosen_lines, infinitesimal_chains=chains)
+            
+
+    #def contract_minus_one_curves(self, curve:ToricLatticeElement) -> :
+
+    #def is_blowdown(self, curves:list[ToricLatticeElement]) -> bool:
+
+
+    def contract_disjoint_minus_one_curves(self, curves:list[ToricLatticeElement]) -> 'Surface':
+        assert all(c in self.minus_one_curves for c in curves)
+        assert all(self.dot(c,d)==0 for c,d in itertools.combinations(curves,2))
 
 
     def dot(self, a, b):
