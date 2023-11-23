@@ -4,6 +4,8 @@ from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
 from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice
 from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
+from sage.combinat.root_system.cartan_matrix import  CartanMatrix
+from sage.quadratic_forms.quadratic_form import QuadraticForm
 
 from typing import Iterable, Sequence
 from dataclasses import dataclass
@@ -11,6 +13,7 @@ import itertools
 from functools import cached_property, cache
 from collections import Counter
 import re
+from collections.abc import Generator
 
 #from icecream import ic
 #ic.disable()
@@ -32,17 +35,18 @@ def relints_intersect(cone1: ConvexRationalPolyhedralCone, cone2: ConvexRational
 
 class Surface: 
     r'''
-    This class represents a generic del Pezzo surface. It implements the curve classes in the Picard lattice and allows working with cylinders on the surface.
+    This class represents a generic (possibly weak) del Pezzo surface. It implements the curve classes in the Picard lattice and allows working with cylinders on the surface.
 
     Attributes:
         degree: An integer representing the degree of the surface.
         N: A ToricLattice object used to represent the Picard lattice of the variety.
         K: The canonical divisor of the variety.
-        E: A list of Curve (or ToricLatticeElement) objects representing the exceptional curves of the standard blowup from P^2.
+        E: A list of Curve (or ToricLatticeElement) objects representing the exceptional curves of the standard blowup from P^2. TODO make this a list of (maybe reducible) orthogonal (-1)-curves
         L: A Curve object representing the line class from P^2.
         Q: A matrix for the dot product in the Picard group.
         NE: A NE_SubdivisionCone object representing the NE cone.
         minus_one_curves: a list of all (-1)-curves on the surface
+        minus_two_curves: a list of all (-2)-curves on the surface
 
     EXAMPLES::
         sage: S = Surface(5)
@@ -86,10 +90,11 @@ class Surface:
         self.is_weak = len(self.collinear_triples)+len(self.infinitesimal_chains)+len(self.sixs_on_conic)+len(self.cusp_cubics)>0
         blowups = 9  - degree
         self.degree = degree
-        self.check_point_configuration()
+        if self.is_weak:
+            self.check_point_configuration()
 
         self.N = ToricLattice(blowups + 1 )
-        self.K = K = self.N([-3] + [1]*blowups) # canonical divisor TODO express in L, E
+        self.K = self.N([-3] + [1]*blowups) # canonical divisor TODO express in L, E
         E = identity_matrix(QQ, blowups+1 )[:,1:].columns() 
         # E is the set of exceptional curves, so the basis is L, E[0], .. , E[n_blowups-1]
         self.E = [self.N(e) for e in E]
@@ -109,13 +114,13 @@ class Surface:
         for triple in triples:
             assert len(triple) == 3
             assert len(set(triple)) == 3
-            assert set(triple) in range(9-degree)
+            assert set(triple).issubset(range(9-degree))
 
         # two lines intersect only by one point
         for triple1, triple2 in itertools.combinations(triples, 2):
             assert len(set(triple1).intersection(set(triple2)))<=1
 
-        assert set(i for triple in triples for i in triple) in range(9-degree)
+        assert set(i for triple in triples for i in triple).issubset(range(9-degree))
         
         # chains do not have duplicate entries
         assert len(set(i for chain in chains for i in chain)) == sum(len(chain) for chain in chains) 
@@ -123,15 +128,22 @@ class Surface:
         # line can contain only a prefix sublist of a chain
         for triple in triples:
             for chain in chains:
-                cls._point_line_and_chain_align(triple, chain)
+                cls._point_line_and_chain_meet_correctly(triple, chain)
         if degree<=3:
             raise NotImplementedError
 
     @classmethod
-    def _point_line_and_chain_align(cls, triple, chain):
+    def _point_line_and_chain_meet_correctly(cls, triple, chain):
         intersection = [i for i in chain if i in triple]
         return all(intersection[i] == chain[i] for i in range(len(intersection)))
 
+    def singularity_type(self):
+        if len(self.minus_two_curves)==0:
+            return 'A0'
+        T = CartanMatrix(-self.gram_matrix(self.minus_two_curves))
+        return T.cartan_type()
+
+    
     def blowups(self):
         if self.degree<=4:
             raise NotImplementedError
@@ -144,14 +156,14 @@ class Surface:
         new_chains_variants = [self.infinitesimal_chains]
         for i in range(len(self.infinitesimal_chains)):
             new_chain = self.infinitesimal_chains[i] + [p]
-            if all(cls._point_line_and_chain_align(line, new_chain)==False for line in self.collinear_triples):
+            if all(cls._point_line_and_chain_meet_correctly(line, new_chain) for line in self.collinear_triples):
                 new_chains_variants.append(self.infinitesimal_chains[:i] + [new_chain] + self.infinitesimal_chains[i+1:])
         union_of_chains = [i for chain in self.infinitesimal_chains for i in chain]
         for i in range(9-self.degree):
             if i in union_of_chains:
                 continue
             new_chain = [[i,p]]
-            if all(cls._point_line_and_chain_align(line, new_chain)==False for line in self.collinear_triples):
+            if all(cls._point_line_and_chain_meet_correctly(line, new_chain) for line in self.collinear_triples):
                 new_chains_variants.append(self.infinitesimal_chains+new_chain)
 
 
@@ -160,7 +172,7 @@ class Surface:
                         if all(i not in line or j not in line for line in self.collinear_triples)]
         for chains in new_chains_variants:
             # pairs i,j such that a new line (i,j,p) is ok with chains
-            pairs = [pair for pair in candidate_pairs if all(cls._point_line_and_chain_align(pair+[p], chain) for chain in chains)]
+            pairs = [pair for pair in candidate_pairs if all(cls._point_line_and_chain_meet_correctly(pair+[p], chain) for chain in chains)]
             # choose disjoint subsets of pairs so that lines do not coincide
             pair_sets = itertools.chain.from_iterable(itertools.combinations(pairs,r) for r in range(len(pairs)+1))
             for pair_set in pair_sets:
@@ -173,14 +185,43 @@ class Surface:
 
     #def is_blowdown(self, curves:list[ToricLatticeElement]) -> bool:
 
+    # def contractions(self, contracted_curves:list[ToricLatticeElement]|None=None, curves_not_to_contract:list[ToricLatticeElement]|None=None, maximal_only=False):
+    #     if contracted_curves == None:
+    #         contracted_curves = []
+    #     if curves_not_to_contract == None:
+    #         curves_not_to_contract = []
+    #     assert self.is_valid_contraction(contracted_curves)
+    #     if self.is_maximal_contraction(contracted_curves):
+    #         yield contracted_curves
+    #     minus_one_curves_after_contraction = [c for c in self.minus_one_curves + self.minus_two_curves if 
+    #                                           c not in contracted_curves and 
+    #                                           c not in curves_not_to_contract and 
+    #                                           self.dot(c,c, contracted_curves=contracted_curves)==-1]
+    #     subsets = self.disjoint_subsets(minus_one_curves_after_contraction,independent_with=contracted_curves, maximal_only=False)
+    #     for subset in subsets:
+    #         if len(subset)==0:
+    #             yield contracted_curves
+    #             continue
+    #         yield from self.contractions(
+    #             contracted_curves=contracted_curves+subset,
+    #             curves_not_to_contract=curves_not_to_contract + [c for c in minus_one_curves_after_contraction if c not in subset],
+    #             maximal_only=maximal_only
+    #         )
 
-    def contract_disjoint_minus_one_curves(self, curves:list[ToricLatticeElement]) -> 'Surface':
-        assert all(c in self.minus_one_curves for c in curves)
-        assert all(self.dot(c,d)==0 for c,d in itertools.combinations(curves,2))
+    def contractions_P2(self):
+        for subset_to_contract in itertools.combinations(self.minus_one_curves+self.minus_two_curves, 9-self.degree):
+            contraction = Contraction(self, subset_to_contract)
+            if contraction.is_valid():
+                assert contraction.is_maximal()
+                yield contraction
+            
 
-
-    def dot(self, a, b):
+    def dot(self, a:ToricLatticeElement, b:ToricLatticeElement) -> Integer:
         return a*self.Q*b
+
+    def gram_matrix(self, rays):
+        return matrix([[self.dot(a,b) for a in rays] for b in rays])
+
 
     def _N_to_M(self, ray:ToricLatticeElement)->ToricLatticeElement:
         M = self.N.dual()
@@ -194,10 +235,7 @@ class Surface:
 
         
 
-    def gram_matrix(self, rays):
-        return matrix([[self.dot(a,b) for a in rays] for b in rays])
-
-    def Line(self,exceptional_curves:list['Curve'])-> ToricLatticeElement:
+    def Line(self,exceptional_curves:Sequence[ToricLatticeElement])-> ToricLatticeElement:
         return self.N([i/3  for i in (-self.K + sum(exceptional_curves))])
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
@@ -253,25 +291,25 @@ class Surface:
     def Ample(self):
         return self.dual_cone(self.NE)
 
-    def independent_sets(self, curves, size = None):
-        if size == None:
-            yield from self.independent_sets(curves, 9 -self.degree)
-            return
-        if size == 0 :
-            yield []
-            return
-        for i, v in enumerate(curves):
-            orthogonals = [v2 for v2 in curves[i+1 :] if self.dot(v, v2)==0 ]
-            for subset in self.independent_sets(orthogonals, size-1 ):
-                yield subset + [v]
+    # def independent_sets(self, curves, size = None):
+    #     if size == None:
+    #         yield from self.independent_sets(curves, 9 -self.degree)
+    #         return
+    #     if size == 0 :
+    #         yield []
+    #         return
+    #     for i, v in enumerate(curves):
+    #         orthogonals = [v2 for v2 in curves[i+1 :] if self.dot(v, v2)==0 ]
+    #         for subset in self.independent_sets(orthogonals, size-1 ):
+    #             yield subset + [v]
 
-    def maximal_independent_subsets(self, curves:list, independent_with:list|None=None):
+    def disjoint_subsets(self, curves:list, independent_with:list|None=None, maximal_only=True):
         '''
         
         EXAMPLES::
             sage: from collections import Counter
             sage: S = Surface(5)
-            sage: Counter(len(s) for s in S.maximal_independent_subsets(S.minus_one_curves)).most_common()
+            sage: Counter(len(s) for s in S.disjoint_subsets(S.minus_one_curves)).most_common()
             [(3, 10), (4, 5)]
         '''
         if independent_with == None:
@@ -280,12 +318,14 @@ class Surface:
         if len(curves) == 0 :
             yield []
             return
-        curve = curves[-1 ]
-        for subset in self.maximal_independent_subsets(curves[:-1 ], independent_with=independent_with):
-            if not all(self.dot(curve,c)==0  for c in subset):
-                yield subset
-        for subset in self.maximal_independent_subsets(curves[:-1 ], independent_with=independent_with+[curve]):
-            yield subset + [curve]
+        curve = curves[-1]
+        for subset in self.disjoint_subsets(curves[:-1], independent_with=independent_with):
+            if all(self.dot(curve,c)==0  for c in subset):
+                yield subset + [curve]
+                if not maximal_only:
+                    yield subset
+            else:
+                yield subset                
 
     def cone_representative(self, cone_type:str) -> 'NE_SubdivisionCone':
         return NE_SubdivisionCone.representative(self, cone_type)
@@ -302,13 +342,13 @@ class Surface:
                 for e in E:
                     yield Cylinder.make_type_lines(self, E, e)
             case 'lines2':
-                if self.degree <=5 :
+                if self.degree <= 5:
                     for e1,e2,e3,e4 in itertools.combinations(E,int(4 )):
                         yield Cylinder.make_type_lines2(self, E, e1, e2, e3, e4)
                         yield Cylinder.make_type_lines2(self, E, e1, e3, e2, e4)
                         yield Cylinder.make_type_lines2(self, E, e1, e4, e2, e3)
             case 'tangent':
-                if self.degree >= 3 :  
+                if self.degree >= 3:  
                     for e in E:    
                         yield Cylinder.make_type_tangent(self, E, E_on_conic=[f for f in E if f!=e], E_on_tangent=[e])
             case 'P1xP1': 
@@ -322,12 +362,161 @@ class Surface:
 
     def all_cylinders(self, constructions):
         # TODO adapt the size of E for arbitrary degree
-        for E in self.independent_sets(self.minus_one_curves):
+        for E in self.disjoint_subsets(self.minus_one_curves):
             for construction in constructions:
                 yield from self.cylinders(E, construction)
     
     def __str__(self) -> str:
         return f"del Pezzo surface of degree {self.degree}"
+
+
+class Contraction():    
+    '''
+    contracted_curves: A tuple of contracted (irreducible) curves.
+    E: a list of exceptional reducible (-1)-curves, which form an orthogonal basis of the span of the contracted curves. They are sums of chains of contracted curves ending with a (-1)-curve.
+    C: a list of contracted (irreducible) curves in the same order as E.
+    '''
+    S:Surface
+    contracted_curves: tuple[ToricLatticeElement,...]
+    E: list[ToricLatticeElement]
+    C: list[ToricLatticeElement]
+
+    def __init__(self, S:Surface, contracted_curves: Sequence[ToricLatticeElement]) -> None:
+        """
+        Initializes a new instance of the class.
+
+        Args:
+            S (Surface): The surface object.
+            contracted_curves (Sequence[ToricLatticeElement]): A sequence of contracted curves.
+
+        Returns:
+            None
+        """
+        self.S = S
+        self.contracted_curves = tuple(contracted_curves)
+        self.E=[]
+        self.C=[]
+        for chain in self.chains_of_contracted_curves:
+            for i in range(len(chain)):
+                self.C.append(chain[i])
+                self.E.append(sum(chain[i:]))
+
+    @cached_property
+    def chains_of_contracted_curves(self) -> list[list[ToricLatticeElement]]:
+        '''
+        returns list of lists of curves of form [C1,C2..,Cn], where Ei are irreducible contracted curves such that Cn^2=-1, Ci^2=-2 for i<n, and Ci*C_{i+1}=1.
+        '''
+        minus_one_curves = [c for c in self.contracted_curves if self.S.dot(c,c)==-1]
+        minus_two_curves = [c for c in self.contracted_curves if self.S.dot(c,c)==-2]
+        def find_chain(minus_one_curve:ToricLatticeElement)->list[ToricLatticeElement]:
+            chain = [minus_one_curve]
+            while True:
+                next_curves = [c for c in minus_two_curves if self.S.dot(c,chain[-1])==1 and c not in chain]
+                match len(next_curves):
+                    case 0:
+                        return list(reversed(chain))
+                    case 1:
+                        chain.append(next_curves[0])
+                    case _:
+                        raise ValueError("more than one next curve, should be a chain")
+        return [find_chain(c) for c in minus_one_curves]
+                
+    def _E_to_C(self, e:ToricLatticeElement)->ToricLatticeElement:
+        return self.C[self.E.index(e)]
+
+    def _C_to_E(self, c:ToricLatticeElement)->ToricLatticeElement:
+        return self.E[self.C.index(c)]
+
+    @cached_property
+    def L(self):
+        '''
+        returns the class of line on the contracted surface (we assume it to be P2)
+        '''
+        assert self.is_P2()
+        return self.S.Line(self.E)
+
+
+    def project(self, v):
+        return v + sum(self.S.dot(e,v)*e for e in self.E)
+        #return self.S.N(self.picard_projection_matrix*v)
+
+    def is_valid(self) -> bool:
+        g = self.S.gram_matrix(self.contracted_curves)
+        q = QuadraticForm(QQ,g)
+        return q.is_negative_definite() and abs(g.det())==1
+
+    def is_maximal(self) -> bool:
+        return all(self.dot(c,c)>=0 for c in 
+                   self.S.minus_one_curves+self.S.minus_two_curves)        
+
+    def is_P2(self) -> bool:
+        return self.is_maximal() and len(self.contracted_curves) == 9-self.S.degree
+
+    def dot(self, a, b):
+        return self.S.dot(self.project(a),self.project(b))
+
+    def gram_matrix(self, rays):
+        return matrix([[self.dot(a,b) for a in rays] for b in rays])
+
+    def __str__(self) -> str:
+        return f"contraction of curves {self.contracted_curves} on {self.S}"
+
+    def make_cylinder_QT(self, E_on_conic:Sequence[ToricLatticeElement], E_on_tangent:Sequence[ToricLatticeElement], E_on_fibers: list[Sequence[ToricLatticeElement]]|None = None)->'Cylinder':  
+        return Cylinder.make_type_tangent_weak(self.S, self, E_on_conic, E_on_tangent, E_on_fibers)
+    
+    def find_cylinders_QT(self)->list['Cylinder']:
+        labels = ['Q','T','QT','F1','F2','F3','F4']
+        configs = []
+        cylinders = []   
+        empty_config = {c:'' for c in self.contracted_curves}
+        for conic_class in self.conic_classes:
+            for line_class in self.line_classes:
+                config = empty_config.copy()
+                for c in conic_class: # conic_class is not a list of Ci but Picard class
+                    config[self._C_to_E(c)] += 'Q'
+                for c in line_class:
+                    config[self._C_to_E(c)] += 'T'
+                intersection = [c for c,v in config.items() if v=='QT']
+                
+                dim_QT = len(line_classes)
+                if len(intersection)>2:
+                    continue
+                elif len(intersection)==1:
+
+                configs.append(config)
+        return configs
+
+    def are_collinear(self, c1, c2, c3) -> bool:
+        E = [self._C_to_E(c) for c in (c1,c2,c3)]
+        return self.L-sum(E) in self.S.minus_two_curves
+
+    @cached_property
+    def conic_classes(self) -> Generator[ToricLatticeElement,None,None]:
+        for p in itertools.product(*[range(len(chain)) for chain in self.chains_of_contracted_curves]):
+            if sum(p)>5:
+                continue
+            curves_on_conic = [self.chains_of_contracted_curves[i][:n+1] for i,n in enumerate(p)]
+            if any(self.are_collinear(c1,c2,c3) for c1,c2,c3 in itertools.combinations(curves_on_conic,3)):
+                continue
+            yield 2*self.L - sum(self._C_to_E(c) for c in curves_on_conic)
+    
+    @cached_property
+    def line_classes(self) -> Generator[ToricLatticeElement,None,None]:
+        for p in itertools.product(*[range(len(chain)) for chain in self.chains_of_contracted_curves]):
+            if sum(p)>3:
+                continue
+            curves_on_line = [self.chains_of_contracted_curves[i][:n+1] for i,n in enumerate(p)]
+            if any(self.are_collinear(c1,c2,c3)==False for c1,c2,c3 in itertools.combinations(curves_on_line,3)):
+                continue
+            yield self.L - sum(self._E_to_C(c) for c in curves_on_line)
+
+
+
+    #def check_restraints_on_line(self, curves:Sequence[ToricLatticeElement]) -> bool:
+
+
+
+
 
 class Curve(ToricLatticeElement):
     pass #TODO find a reasonable implementation
@@ -339,6 +528,8 @@ class Curve(ToricLatticeElement):
     def __mul__(self, other:'Curve') -> int:
         product = self.S._N_to_M(other) * self
         return product
+
+    
 
 
 @dataclass(frozen=True)
@@ -355,21 +546,22 @@ class Cylinder:
     '''
     S : Surface
     construction: str|None
-    complement : tuple[Curve]
-    support : tuple[Curve]
+    complement : tuple[Curve, ...]
+    support : tuple[Curve, ...]
     fiber: Curve|None = None
     basepoint: Point|None = None
     transversal: bool|None = None
+    dimension: int|None = None
 
     @classmethod
-    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve|None=None, basepoint:Point|None=None, construction:str|None=None, transversal:bool|None=None) -> 'Cylinder':
+    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve|None=None, basepoint:Point|None=None, construction:str|None=None, transversal:bool|None=None, dimension:int|None=None) -> 'Cylinder':
         for c in complement:
             c.set_immutable()
         for c in support:
             c.set_immutable()
         if fiber!=None:
             fiber.set_immutable()    
-        return cls(S, construction, tuple(complement), tuple(support), fiber, basepoint, transversal)
+        return cls(S, construction, tuple(complement), tuple(support), fiber, basepoint, transversal, dimension)
 
     @classmethod
     def make_type_lines(cls, S:Surface, E:list[Curve], e:Curve)->'Cylinder':
@@ -434,6 +626,80 @@ class Cylinder:
             complement = support
             transversal = None
         return cls.make(S, complement, support, 2*L, construction='tangent', transversal=transversal)
+    
+    @classmethod
+    def make_type_tangent_weak(cls, S:Surface, contraction:Contraction, E_on_conic:Sequence[Curve], E_on_tangent:Sequence[Curve], E_on_fibers: list[Sequence[Curve]]|None = None)->'Cylinder':
+        '''
+        We draw a conic and a tangent on P2, and specify the positions of blown up points.
+
+        Parameters:
+            S: the surface
+            contraction: the chosen contraction to P2, i.e. a list of contracted curves.
+            E_on_Q: the minus-curves on conic Q
+            E_on_T: the minus-curves on tangent T. May intersect with E_on_conic.
+            E_on_fibers: for each fiber containing at least two minus-curves (except for the intersection of Q and T), there is a list of minus-curves on that fiber. Fibers containing one minus-curve can be omitted. The minus-curves on the intersection of Q and T are omitted.
+        
+        Remark:
+            Instead of (-2)-curves we operate with the corresponding reducible (-1)-curve, i..e., the total transform of a (-1)-curve. So, if E2 is inf. near of E1, and conic preimage contains E2, then it contains E1.
+        '''
+        if E_on_fibers == None:
+            E_on_fibers = []
+        
+        # TODO just provide classes of L, Q, T, Fi?
+        #TODO assertions: lines are in T and not in Q
+        assert all(e in contraction.E for e in itertools.chain(E_on_conic,E_on_tangent,*E_on_fibers))
+
+        L = S.Line(contraction.E)
+        tangent = L - sum(e for e in E_on_tangent)
+        conic = 2*L - sum(e for e in E_on_conic)
+        fibers = [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
+        #fibers containing at least two Ei
+        special_fibers = [E_on_fiber for E_on_fiber in E_on_fibers if len(E_on_fiber)>1]
+
+        for e in contraction.E:
+            if S.dot(e,tangent)==0 and S.dot(e,conic)==0 and all(S.dot(e,fiber)==0 for fiber in E_on_fibers):
+                fibers.append(2*L - e)
+        pol_gens = list(contraction.contracted_curves) + [conic, tangent] + fibers
+        assert all(S.dot(c,e)<=1 for c in pol_gens for e in contraction.E)
+
+
+        # the dimension of the linear system of possible conics Q
+        dim_Q = 5 - len(E_on_conic)
+        # the dimension of the linear system of possible lines T (before the tangency condition)
+        dim_T = 2 - len(E_on_tangent)
+
+        if dim_Q<0 or dim_T<0:
+            raise ValueError('No cylinders exist')
+
+        # now we compute parameters for the moduli of (Q,T) with tangency condition
+
+        intersection_QT = [e for e in E_on_conic if e in E_on_tangent]
+        if len(intersection_QT)>2:
+            raise ValueError('Q and T have more than double intersection point')
+        elif len(intersection_QT)==2:
+            QT_is_linear = True
+            QT_dimension = dim_Q + dim_T
+        else:
+            QT_is_linear = False
+            QT_dimension = dim_Q + dim_T - 1
+
+        for fiber in special_fibers:
+            QT_dimension -= len(fiber) - 1
+            QT_is_linear = False
+
+        if QT_dimension<0:
+            raise ValueError('No cylinders exist')     
+        transversal = QT_dimension > 0 or not QT_is_linear
+        forb_gens = pol_gens if transversal else [c for c in pol_gens if c!=tangent]
+
+        # checks if there are at least two tangents through a given point. 
+        two_tangents_through_point = len(E_on_tangent)<=1 and all(len(E_on_fiber)<=1 for E_on_fiber in E_on_fibers)<=1
+        # there are at least two tangents such that there is a fiber containing two given points, see CPW Th.6.2.3
+        two_tangents_with_fiber_through_two_points = len(E_on_tangent)==0 and len(special_fibers)<=1 and all(len(E_on_fiber)<=2 for E_on_fiber in special_fibers)
+        if two_tangents_through_point or two_tangents_with_fiber_through_two_points:            
+            assert transversal == True
+
+        return cls.make(S, forb_gens, pol_gens, 2*L, construction='tangent', transversal=transversal, dimension = QT_dimension)
 
     @classmethod
     def make_type_tangent2(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve])->'Cylinder':
@@ -584,6 +850,7 @@ class CylinderList(list):
         super().__setitem__(index, self._validate_cylinder(item))
 
     def insert(self, index, item):
+        print(super(), type(self))
         super().insert(index, self._validate_cylinder(item))
 
     def append(self, item):
@@ -762,7 +1029,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             curves = S.minus_one_curves + S.minus_two_curves
         else:
             curves = S.minus_one_curves
-        NE = cls(curves)
+        NE = cls(curves, S.N)
         NE.S = S
         NE.parent = None
         NE.parent_face = None
@@ -907,7 +1174,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             rays = list(self.parent_face.rays())
             if not all(r in self.S.minus_one_curves for r in rays):
                 return 'NE.unknown-child-1'
-            E = next(self.S.maximal_independent_subsets(rays))
+            E = next(self.S.disjoint_subsets(rays))
             if len(E) == len(rays):
                 res = f'B({rank})'
                 other_disjoint_curves = self.S.curves_not_meeting(self.S.minus_one_curves, rays)
