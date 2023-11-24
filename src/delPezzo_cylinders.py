@@ -1,4 +1,4 @@
-from sage.all_cmdline import *   # import sage library
+#from sage.all_cmdline import *   # import sage library
 from sage.matrix.constructor import matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
@@ -14,9 +14,10 @@ from functools import cached_property, cache
 from collections import Counter
 import re
 from collections.abc import Generator
+from sage.rings.rational import Rational
 
-#from icecream import ic
-#ic.disable()
+from icecream import ic
+ic.disable()
 
 #TODO make relint a class (dumb class over cone with set operators)
 
@@ -208,15 +209,18 @@ class Surface:
     #             maximal_only=maximal_only
     #         )
 
-    def contractions_P2(self):
+    def contractions_P2(self) -> Generator['Contraction', None, None]:
         for subset_to_contract in itertools.combinations(self.minus_one_curves+self.minus_two_curves, 9-self.degree):
-            contraction = Contraction(self, subset_to_contract)
+            try:
+                contraction = Contraction(self, subset_to_contract)
+            except AssertionError:
+                continue
             if contraction.is_valid():
                 assert contraction.is_maximal()
                 yield contraction
             
 
-    def dot(self, a:ToricLatticeElement, b:ToricLatticeElement) -> Integer:
+    def dot(self, a:ToricLatticeElement, b:ToricLatticeElement) -> int:
         return a*self.Q*b
 
     def gram_matrix(self, rays):
@@ -378,8 +382,8 @@ class Contraction():
     '''
     S:Surface
     contracted_curves: tuple[ToricLatticeElement,...]
-    E: list[ToricLatticeElement]
-    C: list[ToricLatticeElement]
+    E: tuple[ToricLatticeElement,...]
+    C: tuple[ToricLatticeElement,...]
 
     def __init__(self, S:Surface, contracted_curves: Sequence[ToricLatticeElement]) -> None:
         """
@@ -394,12 +398,16 @@ class Contraction():
         """
         self.S = S
         self.contracted_curves = tuple(contracted_curves)
-        self.E=[]
-        self.C=[]
+        E=[]
+        C=[]
+        assert self.is_valid(), 'contraction is not valid'
         for chain in self.chains_of_contracted_curves:
             for i in range(len(chain)):
-                self.C.append(chain[i])
-                self.E.append(sum(chain[i:]))
+                C.append(chain[i])
+                E.append(sum(chain[i:]))
+        assert len(E) == len(C)
+        self.E = tuple(E)
+        self.C = tuple(C)
 
     @cached_property
     def chains_of_contracted_curves(self) -> list[list[ToricLatticeElement]]:
@@ -425,6 +433,8 @@ class Contraction():
         return self.C[self.E.index(e)]
 
     def _C_to_E(self, c:ToricLatticeElement)->ToricLatticeElement:
+        assert c in self.C, f"{c} is not in {self.C}"
+        assert len(self.E) == len(self.C), f"{self.E} and {self.C} have different lengths"
         return self.E[self.C.index(c)]
 
     @cached_property
@@ -463,52 +473,152 @@ class Contraction():
 
     def make_cylinder_QT(self, E_on_conic:Sequence[ToricLatticeElement], E_on_tangent:Sequence[ToricLatticeElement], E_on_fibers: list[Sequence[ToricLatticeElement]]|None = None)->'Cylinder':  
         return Cylinder.make_type_tangent_weak(self.S, self, E_on_conic, E_on_tangent, E_on_fibers)
-    
+
+    def find_cylinders_LL(self)->list['Cylinder']:
+        cylinders = []
+        for L1, dim_1 in self.line_classes:
+            for L2, dim_2 in self.line_classes:
+                intersection = [self._E_to_C(e) for e in self.E if self.S.dot(e,L1)==1 and self.S.dot(e,L2)==1]
+                base_curves = [chain[0] for chain in self.chains_of_contracted_curves]
+                curves_on_other_fibers = [c for c in base_curves if self.S.dot(self._C_to_E(c),L1+L2)==0]
+                complement = list(self.C)
+                # we don't check the case when, say, fibers L12, L34 and L56 intersect in the same point (i.e., Echkardt point). Indeed, this case is automatically covered when generic flexibility is in question
+                support = list(self.C) + [L1, L2] + [self.L- self._C_to_E(c) for c in curves_on_other_fibers]
+                if len(intersection)>1:
+                    continue
+                if dim_1 == 0:
+                    complement.append(L1)
+                if dim_2 == 0:
+                    complement.append(L2)
+                dimension = dim_1+dim_2
+                transversal = dimension>0 
+
+
+                basepoint = Point(frozenset([L1,L2])) if len(intersection)==0 else None
+                cylinder = Cylinder.make(self.S, 
+                                         complement=complement, 
+                                         support=support, 
+                                         fiber=2*self.L - sum(intersection), 
+                                         basepoint=basepoint,
+                                         construction='lines',
+                                         transversal=transversal,
+                                         dimension=dimension)
+                cylinders.append(cylinder)
+        return cylinders
     def find_cylinders_QT(self)->list['Cylinder']:
         labels = ['Q','T','QT','F1','F2','F3','F4']
-        configs = []
         cylinders = []   
-        empty_config = {c:'' for c in self.contracted_curves}
-        for conic_class in self.conic_classes:
-            for line_class in self.line_classes:
+        #TODO remove configs?
+        empty_config = {c:'' for c in self.C}
+        for Q, dim_Q in self.conic_classes:
+            for T, dim_T in self.line_classes:
                 config = empty_config.copy()
-                for c in conic_class: # conic_class is not a list of Ci but Picard class
-                    config[self._C_to_E(c)] += 'Q'
-                for c in line_class:
-                    config[self._C_to_E(c)] += 'T'
-                intersection = [c for c,v in config.items() if v=='QT']
-                
-                dim_QT = len(line_classes)
+                QT_is_linear = True
+                for c in self.C: 
+                    e = self._C_to_E(c)
+                    if self.S.dot(e,Q) == 1:
+                        config[c] = 'Q'
+                    if self.S.dot(e,T) == 1:
+                        config[c] += 'T'
+                intersection = [c for c,v in config.items() if v=='QT']                
+                dim_QT = dim_Q + dim_T
+                if(dim_QT<=2):
+                    ic(Q,T, config, dim_Q, dim_T, intersection)
                 if len(intersection)>2:
                     continue
-                elif len(intersection)==1:
+                elif len(intersection)==2:
+                    c1,c2 = intersection
+                    if self.S.dot(c1,c2) != 1:
+                        continue
+                elif len(intersection) == 1:
+                    c = intersection[0]
+                    c_neighours = [d for d in self.C if self.S.dot(d,c)==1]
+                    if len(c_neighours)==1 and config[c_neighours[0]]!='':
+                            continue
+                    dim_QT -= 1
+                else:
+                    dim_QT -= 1
+                    QT_is_linear = False
+                
+                if dim_QT < 0:
+                    continue
 
-                configs.append(config)
-        return configs
+                transversal = dim_QT > 0 or not QT_is_linear
+                complement = list(self.C)
+                support = complement + [Q, T]                
+                if dim_Q == 0:
+                    complement.append(Q)
+                    if dim_QT == 0 and QT_is_linear:
+                        complement.append(T)
+                elif dim_T == 0:
+                    complement.append(T)
+                #TODO special fibers
+
+                basepoint = Point(frozenset([Q,T])) if len(intersection)==0 else None
+                cylinder = Cylinder.make(self.S, 
+                                         complement=complement, 
+                                         support=support, 
+                                         fiber=2*self.L - sum(intersection), 
+                                         basepoint=basepoint,
+                                         construction='tangent',
+                                         transversal=transversal,
+                                         dimension=dim_QT)
+                cylinders.append(cylinder)
+        return cylinders
 
     def are_collinear(self, c1, c2, c3) -> bool:
         E = [self._C_to_E(c) for c in (c1,c2,c3)]
         return self.L-sum(E) in self.S.minus_two_curves
 
     @cached_property
-    def conic_classes(self) -> Generator[ToricLatticeElement,None,None]:
-        for p in itertools.product(*[range(len(chain)) for chain in self.chains_of_contracted_curves]):
-            if sum(p)>5:
+    def conic_classes(self) -> list[tuple[ToricLatticeElement,int]]:
+        '''
+        return a list of Picard classes of proper transforms of conics in P2, each with the dimension of the corresponding linear system.
+        '''
+        result = []
+        for p in itertools.product(*[range(len(chain)+1) for chain in self.chains_of_contracted_curves]):
+            dimension = 5 - sum(p)
+            if dimension < 0:
                 continue
-            curves_on_conic = [self.chains_of_contracted_curves[i][:n+1] for i,n in enumerate(p)]
+            curves_on_conic = [curve for i,n in enumerate(p) for
+                               curve in self.chains_of_contracted_curves[i][:n]]
             if any(self.are_collinear(c1,c2,c3) for c1,c2,c3 in itertools.combinations(curves_on_conic,3)):
                 continue
-            yield 2*self.L - sum(self._C_to_E(c) for c in curves_on_conic)
+            conic_class = 2*self.L - sum(self._C_to_E(c) for c in curves_on_conic)
+            conic_class.set_immutable()
+            result.append([conic_class, dimension])
+        return result
     
     @cached_property
-    def line_classes(self) -> Generator[ToricLatticeElement,None,None]:
-        for p in itertools.product(*[range(len(chain)) for chain in self.chains_of_contracted_curves]):
+    def line_classes(self) -> list[tuple[ToricLatticeElement,int]]:
+        '''
+        return a list of Picard classes of proper transforms of lines in P2, each with the dimension of the corresponding linear system.
+        '''
+        #TODO rewrite by taking all collinear triples, then non-collinear pairs, then single base curves, and then a generic class
+        result = []
+        for p in itertools.product(*[range(len(chain)+1) for chain in self.chains_of_contracted_curves]):
+            dimension = 2 - sum(p)
             if sum(p)>3:
                 continue
-            curves_on_line = [self.chains_of_contracted_curves[i][:n+1] for i,n in enumerate(p)]
+            curves_on_line = [c for i,n in enumerate(p) for c in self.chains_of_contracted_curves[i][:n]]
             if any(self.are_collinear(c1,c2,c3)==False for c1,c2,c3 in itertools.combinations(curves_on_line,3)):
                 continue
-            yield self.L - sum(self._E_to_C(c) for c in curves_on_line)
+            dimension = 2 - len(curves_on_line)
+            if dimension == -1:
+                if self.are_collinear(*curves_on_line):
+                    dimension = 0
+                else:
+                    continue
+            
+            # check that if two ci are on line, then another ci collinear with them is on line
+            other_curves_meeting_line = [c for c in self.C if any(self.are_collinear(c1, c2, c) for c1, c2 in itertools.combinations(curves_on_line, 2))]            
+            if not set(other_curves_meeting_line).issubset(set(curves_on_line)):
+                continue
+            
+            line_class = self.L - sum(self._C_to_E(c) for c in curves_on_line)
+            line_class.set_immutable()
+            result.append([line_class, dimension])
+        return result
 
 
 
@@ -1197,7 +1307,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             E = [r for r in rays if r in self.S.minus_one_curves]
             has_anticanonical_ray = -self.S.K in rays
             if len(rays) - len(E) != 1 if has_anticanonical_ray else 0:
-                print(rays, E, B, rank)
+                #print(rays, E, B, rank)
                 return 'C.unknown-child-6'
             if not all(self.S.dot(e1,e2)<=0 for e1 in E for e2 in E):
                 return 'C.unknown-child-4'
@@ -1263,7 +1373,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         for cone_type in cls.cone_types(S):
             yield cls.representative(S, cone_type)
 
-    def relative_volume(self, cone:ConvexRationalPolyhedralCone) -> Rational:
+    def relative_volume(self, cone:ConvexRationalPolyhedralCone):
         '''
         given a subcone of self, computes the intersection with an affine hyperplane orthogonal to -K and returns the volume of the subcone divided by the volume of self
         '''
