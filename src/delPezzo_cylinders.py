@@ -1,4 +1,4 @@
-#from sage.all_cmdline import *   # import sage library
+from sage.all_cmdline import *   # import sage library, otherwise other imports break
 from sage.matrix.constructor import matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
@@ -17,7 +17,7 @@ from collections.abc import Generator
 from sage.rings.rational import Rational
 
 from icecream import ic
-ic.disable()
+#ic.disable()
 
 #TODO make relint a class (dumb class over cone with set operators)
 
@@ -78,7 +78,7 @@ class Surface:
         if extra == None:
             extra = dict()
 
-
+        self.extra = extra
         if degree == 2 :
             if 'tacnodal_curves' in extra.keys():
                 self.tacnodal_curves = int(extra['tacnodal_curves'])
@@ -246,7 +246,9 @@ class Surface:
     @cached_property
     def minus_two_curves(self) -> list['Curve']:
         collinear = [self.L - self.E[i] - self.E[j] - self.E[k] for i,j,k in self.collinear_triples]
+        
         infinitesimal = [self.E[chain[i]]-self.E[chain[i+1]] for chain in self.infinitesimal_chains for i in range(len(chain)-1)]
+        
         conic = [2*self.L - sum(self.E[i] for i in six) for six in self.sixs_on_conic]
         cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.cusp_cubics]
         curves = collinear + infinitesimal + conic + cubic
