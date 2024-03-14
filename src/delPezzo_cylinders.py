@@ -1,4 +1,4 @@
-from sage.all_cmdline import *   # import sage library, otherwise other imports break
+from sage.all_cmdline import *   # import sage library, otherwise other imports break #type: ignore
 from sage.matrix.constructor import matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
@@ -16,7 +16,7 @@ import re
 from collections.abc import Generator
 from sage.rings.rational import Rational
 
-from icecream import ic
+#from icecream import ic
 #ic.disable()
 
 #TODO make relint a class (dumb class over cone with set operators)
@@ -75,13 +75,12 @@ class Surface:
         if degree<1  or degree>9 :
             raise ValueError("degree must be between 1 and 9")
         
-        if extra == None:
-            extra = dict()
+        self._curve_names = dict()
+        self.extra = extra if extra != None else dict()
 
-        self.extra = extra
         if degree == 2 :
-            if 'tacnodal_curves' in extra.keys():
-                self.tacnodal_curves = int(extra['tacnodal_curves'])
+            if 'tacnodal_curves' in self.extra.keys():
+                self.tacnodal_curves = int(self.extra['tacnodal_curves'])
             else:
                 self.tacnodal_curves = 0 
         self.collinear_triples = collinear_triples if  collinear_triples!=None else []
@@ -107,11 +106,11 @@ class Surface:
         self.NE = NE_SubdivisionCone.NE(self)
 
     def check_point_configuration(self):
-        if not self.__class__._check_points_lines_and_chains(self.collinear_triples, self.infinitesimal_chains, self.degree):
+        if not self.__class__._check_weak_relations(self.collinear_triples, self.infinitesimal_chains, self.sixs_on_conic, self.degree):
             return False
 
     @classmethod
-    def _check_points_lines_and_chains(cls, triples, chains, degree):
+    def _check_weak_relations(cls, triples, chains, conics, degree):
         for triple in triples:
             assert len(triple) == 3
             assert len(set(triple)) == 3
@@ -130,7 +129,15 @@ class Surface:
         for triple in triples:
             for chain in chains:
                 cls._point_line_and_chain_meet_correctly(triple, chain)
-        if degree<=3:
+        
+        for six in conics:
+            for triple in triples:
+                assert not all(p in six for p in triple)
+
+        for six1, six2 in itertools.combinations(conics, 2):
+            assert len([p in six1 for p in six2]) < 5
+        
+        if degree<=2:
             raise NotImplementedError
 
     @classmethod
@@ -146,7 +153,7 @@ class Surface:
 
     
     def blowups(self):
-        if self.degree<=4:
+        if self.degree<=3:
             raise NotImplementedError
         p = 9-self.degree
         
@@ -168,6 +175,9 @@ class Surface:
                 new_chains_variants.append(self.infinitesimal_chains+new_chain)
 
 
+        possible_new_conics = [list(five) +[p] for five in itertools.combinations(range(9-self.degree),5)]
+        possible_new_conics = [six for six in possible_new_conics if all(len(set(six).intersection(set(six2))) < 5 for six2 in self.sixs_on_conic)]
+
         # pairs of points which are not contained in an existing line
         candidate_pairs = [[i,j] for i,j in itertools.combinations(range(9-self.degree),2)  
                         if all(i not in line or j not in line for line in self.collinear_triples)]
@@ -179,7 +189,12 @@ class Surface:
             for pair_set in pair_sets:
                 if all(set(a).isdisjoint(b) for a,b in itertools.combinations(pair_set,2)): # if pair_set is disjoint
                     chosen_lines = [pair+[p] for pair in pair_set]
-                    yield Surface(self.degree-1, collinear_triples=self.collinear_triples+chosen_lines, infinitesimal_chains=chains)
+                    new_collinear_triples = self.collinear_triples+chosen_lines
+                    conics_candidates = [six for six in possible_new_conics if all(not set(triple).issubset(set(six)) for triple in new_collinear_triples)]
+                    conic_subsets = itertools.chain.from_iterable(itertools.combinations(conics_candidates, r) for r in range(len(conics_candidates)+1))
+                    for conic_subset in conic_subsets:
+                        if all(len(set(six1).intersection(set(six2))) < 5 for six1, six2 in itertools.combinations(conic_subset, 2)):
+                            yield Surface(self.degree-1, collinear_triples=new_collinear_triples, infinitesimal_chains=chains, sixs_on_conic=self.sixs_on_conic+conic_subset)
             
 
     #def contract_minus_one_curves(self, curve:ToricLatticeElement) -> :
@@ -243,24 +258,46 @@ class Surface:
         return self.N([i/3  for i in (-self.K + sum(exceptional_curves))])
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
+    def _add_curve_name(self, curve:'Curve', name:str)->'Curve':
+        curve.set_immutable()
+        self._curve_names[curve] = name
+        return curve
+
+    def _curve_name(self, curve:'Curve') -> str:
+        #print('naming curve ', curve)
+        if curve in self._curve_names.keys() and curve in self.minus_one_curves+self.minus_two_curves:
+            return self._curve_names[curve]
+        else:
+            return str(curve)
+
+    def _curves_name(self, curves:Sequence['Curve']) -> str:
+        return ', '.join([self._curve_name(c) for c in curves])#print('naming curve ', curve)
+
     @cached_property
     def minus_two_curves(self) -> list['Curve']:
-        collinear = [self.L - self.E[i] - self.E[j] - self.E[k] for i,j,k in self.collinear_triples]
+        collinear = [self._add_curve_name(self.L - self.E[i] - self.E[j] - self.E[k], f'L_{i+1}{j+1}{k+1}') for i,j,k in self.collinear_triples]
         
-        infinitesimal = [self.E[chain[i]]-self.E[chain[i+1]] for chain in self.infinitesimal_chains for i in range(len(chain)-1)]
+        infinitesimal = [self._add_curve_name(self.E[chain[i]]-self.E[chain[i+1]], f'E_{chain[i]}{chain[i+1]}') for chain in self.infinitesimal_chains for i in range(len(chain)-1)]
         
-        conic = [2*self.L - sum(self.E[i] for i in six) for six in self.sixs_on_conic]
+        conic = [self._add_curve_name(2*self.L - sum(self.E[i] for i in six), f'Q{"".join(i+1 for i in range(len(self.E)) if i not in six)}') for six in self.sixs_on_conic]
         cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.cusp_cubics]
         curves = collinear + infinitesimal + conic + cubic
         curves = normalize_rays(curves, self.N)
         return curves
 
+    # def curve_name(self, c) -> str|None:
+    #     if c in self.minus_one_curves:
+    #         match self.dot(c, self.L):
+    #             case 0:
+    #                 pass
+
+
 
     @cached_property
     def minus_one_curves(self) -> list['Curve']:
-        exceptional_curves = self.E
-        lines = [self.L-ei-ej for ei,ej in itertools.combinations(self.E, 2 )]
-        conics = [2 *self.L-sum(points) for points in itertools.combinations(self.E, 5 )]
+        exceptional_curves = [self._add_curve_name(e, f'E_{i+1}') for i,e in enumerate(self.E)]
+        lines = [self._add_curve_name(self.L-self.E[i]-self.E[j], f'L_{i+1}{j+1}') for i,j in itertools.combinations(range(len(self.E)), 2 )]
+        conics = [self._add_curve_name(2 *self.L-sum(self.E[i] for i in points), f'Q_{"".join(i+1 for i in range(len(self.E)) if i not in points)}') for points in itertools.combinations(range(len(self.E)), 5 )]
         cubics = [3 *self.L-sum(points)-double for points in itertools.combinations(self.E, 7 ) for double in points]
         curves = exceptional_curves + lines + conics + cubics
         if self.degree == 1 :
@@ -476,40 +513,38 @@ class Contraction():
     def make_cylinder_QT(self, E_on_conic:Sequence[ToricLatticeElement], E_on_tangent:Sequence[ToricLatticeElement], E_on_fibers: list[Sequence[ToricLatticeElement]]|None = None)->'Cylinder':  
         return Cylinder.make_type_tangent_weak(self.S, self, E_on_conic, E_on_tangent, E_on_fibers)
 
-    def find_cylinders_LL(self)->list['Cylinder']:
-        cylinders = []
+    def find_cylinders_LL(self)->Generator['Cylinder',None,None]:
         for L1, dim_1 in self.line_classes:
             for L2, dim_2 in self.line_classes:
                 intersection = [self._E_to_C(e) for e in self.E if self.S.dot(e,L1)==1 and self.S.dot(e,L2)==1]
+                if len(intersection)>1:
+                    continue
                 base_curves = [chain[0] for chain in self.chains_of_contracted_curves]
                 curves_on_other_fibers = [c for c in base_curves if self.S.dot(self._C_to_E(c),L1+L2)==0]
                 complement = list(self.C)
                 # we don't check the case when, say, fibers L12, L34 and L56 intersect in the same point (i.e., Echkardt point). Indeed, this case is automatically covered when generic flexibility is in question
                 support = list(self.C) + [L1, L2] + [self.L- self._C_to_E(c) for c in curves_on_other_fibers]
-                if len(intersection)>1:
-                    continue
                 if dim_1 == 0:
                     complement.append(L1)
                 if dim_2 == 0:
                     complement.append(L2)
-                dimension = dim_1+dim_2
+                dimension = dim_1 + dim_2 if len(intersection) == 0 else 0
                 transversal = dimension>0 
 
-
                 basepoint = Point(frozenset([L1,L2])) if len(intersection)==0 else None
-                cylinder = Cylinder.make(self.S, 
+                yield Cylinder.make(self.S, 
+                                         construction='lines',
+                                         contraction=self,
+                                         pencil_generators=(L1,L2),
                                          complement=complement, 
                                          support=support, 
                                          fiber=2*self.L - sum(intersection), 
                                          basepoint=basepoint,
-                                         construction='lines',
                                          transversal=transversal,
                                          dimension=dimension)
-                cylinders.append(cylinder)
-        return cylinders
-    def find_cylinders_QT(self)->list['Cylinder']:
+
+    def find_cylinders_QT(self)->Generator['Cylinder',None,None]:
         labels = ['Q','T','QT','F1','F2','F3','F4']
-        cylinders = []   
         #TODO remove configs?
         empty_config = {c:'' for c in self.C}
         for Q, dim_Q in self.conic_classes:
@@ -524,8 +559,8 @@ class Contraction():
                         config[c] += 'T'
                 intersection = [c for c,v in config.items() if v=='QT']                
                 dim_QT = dim_Q + dim_T
-                if(dim_QT<=2):
-                    ic(Q,T, config, dim_Q, dim_T, intersection)
+                # if(dim_QT<=2):
+                #     ic(Q,T, config, dim_Q, dim_T, intersection)
                 if len(intersection)>2:
                     continue
                 elif len(intersection)==2:
@@ -557,16 +592,16 @@ class Contraction():
                 #TODO special fibers
 
                 basepoint = Point(frozenset([Q,T])) if len(intersection)==0 else None
-                cylinder = Cylinder.make(self.S, 
+                yield Cylinder.make(self.S, 
                                          complement=complement, 
                                          support=support, 
+                                         construction='tangent',
+                                         contraction=self,
+                                         pencil_generators=(Q,T),
                                          fiber=2*self.L - sum(intersection), 
                                          basepoint=basepoint,
-                                         construction='tangent',
                                          transversal=transversal,
                                          dimension=dim_QT)
-                cylinders.append(cylinder)
-        return cylinders
 
     def are_collinear(self, c1, c2, c3) -> bool:
         E = [self._C_to_E(c) for c in (c1,c2,c3)]
@@ -595,6 +630,7 @@ class Contraction():
     def line_classes(self) -> list[tuple[ToricLatticeElement,int]]:
         '''
         return a list of Picard classes of proper transforms of lines in P2, each with the dimension of the corresponding linear system.
+        UPD: actually, they are linear systems, i.e., smaller objects than classes
         '''
         #TODO rewrite by taking all collinear triples, then non-collinear pairs, then single base curves, and then a generic class
         result = []
@@ -629,13 +665,13 @@ class Contraction():
 
 
 
-
 class Curve(ToricLatticeElement):
-    pass #TODO find a reasonable implementation
+    #pass #TODO find a reasonable implementation
     # TODO make immutable    
-    def __init__(self, S:Surface, coordinates:list[int]):
+    def __init__(self, coordinates, name:str|None=None):
         super().__init__(coordinates)
-        self.S = S
+        self.name = name
+    #components = []
 
     def __mul__(self, other:'Curve') -> int:
         product = self.S._N_to_M(other) * self
@@ -658,6 +694,8 @@ class Cylinder:
     '''
     S : Surface
     construction: str|None
+    contraction: Contraction|None
+    pencil_generators: tuple[Curve, Curve]|None
     complement : tuple[Curve, ...]
     support : tuple[Curve, ...]
     fiber: Curve|None = None
@@ -666,14 +704,14 @@ class Cylinder:
     dimension: int|None = None
 
     @classmethod
-    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve|None=None, basepoint:Point|None=None, construction:str|None=None, transversal:bool|None=None, dimension:int|None=None) -> 'Cylinder':
+    def make(cls, S:Surface, complement:list[Curve], support:list[Curve], fiber:Curve|None=None, basepoint:Point|None=None, construction:str|None=None, contraction:Contraction|None=None, pencil_generators:tuple[Curve, Curve]|None=None, transversal:bool|None=None, dimension:int|None=None) -> 'Cylinder':
         for c in complement:
             c.set_immutable()
         for c in support:
             c.set_immutable()
         if fiber!=None:
             fiber.set_immutable()    
-        return cls(S, construction, tuple(complement), tuple(support), fiber, basepoint, transversal, dimension)
+        return cls(S, construction, contraction, pencil_generators, tuple(complement), tuple(support), fiber, basepoint, transversal, dimension)
 
     @classmethod
     def make_type_lines(cls, S:Surface, E:list[Curve], e:Curve)->'Cylinder':
@@ -935,6 +973,19 @@ class Cylinder:
                     continue
                 yield t
 
+    def latex(self) -> str:
+        result = \
+            f'''
+            construction: {self.construction}
+            used contraction: {self.S._curves_name(self.contraction.contracted_curves)}
+            pencil generators: {self.S._curves_name(self.pencil_generators)}
+            generic fiber: {self.fiber}
+            polarity cone generators: {self.S._curves_name(self.support)}
+            forbidden cone generators: {self.S._curves_name(self.complement)}
+            is transversal: {self.transversal}
+            '''
+            
+        return result
 
 
 class CylinderList(list):
