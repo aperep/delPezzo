@@ -1,8 +1,6 @@
 # delPezzo
 
-This is a Sagemath module for studying flexibility of affine cones over del Pezzo surfaces, see [arXiv:2305.06462](https://arxiv.org/abs/2305.06462). 
-
-
+This is a Sagemath module for studying flexibility of affine cones over del Pezzo surfaces, see [arXiv:2305.06462](https://arxiv.org/abs/2305.06462).
 
 ## Quickstart
 
@@ -31,8 +29,7 @@ collection = Cylinder.make_type_cuspcubic(S, S.E, S.E[-4:])
 The list of available subdivision cones for `S` is returned by `NE_SubdivisionCone.cone_types(S)`.
 The rays of polarity and forbidden cones of the collection are returned by `collection.Pol.rays()`
 and `collection.Forb.rays()` respectively.
-The properties of the collection in the relative interior of a given cone (B3 here) as well as subdivision cones, 
-where the collection is polar and complete, can be checked with the following methods.
+The properties of the collection in the relative interior of a given cone (B3 here) as well as subdivision cones, where the collection is polar and complete, can be checked with the following methods.
 
 ```python
 collection.is_polar_on(B3) # False
@@ -52,7 +49,10 @@ The method `collection.make_polar_on(cone)` filters out the cylinders that are
 not polar inside the cone, and `collection.reduce()` removes abundant cylinders from
 the collection while keeping the forbidden cone unchanged.
 
-
 ## Tests
 
 The tests are implemented in files `src/test_*.py` and can be mass-checked with `pytest`. There is also a notebook `tests/tests.ipynb` with all tests included for convenience.
+
+## Authorship
+
+Created by [Alexander Perepechko](https://www.hse.ru/en/staff/aperep/).
