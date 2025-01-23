@@ -53,6 +53,10 @@ the collection while keeping the forbidden cone unchanged.
 
 The tests are implemented in files `src/test_*.py` and can be mass-checked with `pytest`. There is also a notebook `tests/tests.ipynb` with all tests included for convenience.
 
+## Data
+
+The folder `data` contains data on weak del Pezzo surfaces, see `data/readme.txt`.
+
 ## Authorship
 
 Created by [Alexander Perepechko](https://www.hse.ru/en/staff/aperep/).
