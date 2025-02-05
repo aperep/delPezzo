@@ -1,4 +1,4 @@
-from delPezzo_cylinders import Surface, CylinderList, Cylinder, NE_SubdivisionCone
+from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
 
 
 '''

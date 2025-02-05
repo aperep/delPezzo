@@ -1,9 +1,9 @@
-from delPezzo_cylinders import *
+from delPezzo import *
 
 def test_S5_covering():
     S = Surface(5)
     constructions = ['P1xP1', 'lines', 'tangent', 'lines2']
-    cylinders = [c for c in S.all_cylinders(constructions)]
+    cylinders = [c for c in CylinderGenerator.all_cylinders(S,constructions)]
     total_collection = CylinderList(cylinders)
     cones = [c for c in NE_SubdivisionCone.representatives(S)]
     cone = NE_SubdivisionCone.representative(S,'B(0)')
@@ -21,7 +21,7 @@ def test_cone_types(deg:int=3):
 
 def test_S3_tangent_covering():
     S = Surface(3)
-    collection = CylinderList(S.cylinders(S.E, 'tangent'))
+    collection = CylinderList(CylinderGenerator.cylinders(S, S.E, 'tangent'))
     for i in range(1, 7):
         t = f'B({i})'
         cone = NE_SubdivisionCone.representative(S, t)
@@ -32,7 +32,7 @@ def test_S3_tangent_covering():
 def test_S3_cover_anticanonical():
     S = Surface(3)
     constructions = ['P1xP1', 'lines', 'tangent']
-    cylinders = [c for c in S.all_cylinders(constructions)]
+    cylinders = [c for c in CylinderGenerator.all_cylinders(S, constructions)]
     cone = NE_SubdivisionCone.representative(S,'B(0)')
     collection = CylinderList(cylinders)
     covering = collection.make_polar_on(cone)

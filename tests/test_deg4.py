@@ -1,4 +1,5 @@
-from delPezzo_cylinders import *
+from delPezzo import *
+from sage.geometry.cone import Cone
 #from icecream import ic
 
 
@@ -9,7 +10,7 @@ def test_ParkWon_B():
     S = Surface(4)
     
     # case B(i)
-    Ui = CylinderList(S.cylinders(S.E, 'lines2')).make_polar_on('B(1)')
+    Ui = CylinderList(CylinderGenerator.cylinders(S, S.E, 'lines2')).make_polar_on('B(1)')
     assert len(Ui)==3
     for i in range(1, 6):
         break

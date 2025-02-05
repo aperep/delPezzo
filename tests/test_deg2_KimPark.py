@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
-from delPezzo_cylinders import Surface, CylinderList, Cylinder, NE_SubdivisionCone
+from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
 
 S2 = Surface(2)
 

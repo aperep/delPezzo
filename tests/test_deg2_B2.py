@@ -1,8 +1,8 @@
 from sage.geometry.cone import Cone 
 from sage.geometry.polyhedron.constructor import Polyhedron
-import tikzplotlib
 
-from delPezzo_cylinders import Surface, Cylinder, NE_SubdivisionCone, relints_intersect
+
+from delPezzo import Surface, Cylinder, NE_SubdivisionCone, relints_intersect
 
 
 S2 = Surface(2)
@@ -55,5 +55,10 @@ if __name__ == '__main__':
     P3 = polar_subset_on_B2(S2, C3.Pol)
     #P0.plot() + P1.plot() + P2.plot() + P3.plot()
     P = P1.plot() + P2.plot() + P3.plot()
-    with open('../local/B2_CPW.tex', 'w') as f:
-        print(tikzplotlib.get_tikz_code(P.matplotlib()), file=f)
+
+    try:
+        import tikzplotlib
+        with open('../local/B2_CPW.tex', 'w') as f:
+            print(tikzplotlib.get_tikz_code(P.matplotlib()), file=f)
+    except ModuleNotFoundError:
+        print('tikzplotlib not installed')

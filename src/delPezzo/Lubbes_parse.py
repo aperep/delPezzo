@@ -1,6 +1,6 @@
 import re
 from typing import Generator
-from delPezzo_cylinders import Surface
+from delPezzo import Surface
 
 def generate_surfaces(degree:int) -> Generator[Surface, None, None]:
     results = []
