@@ -5,7 +5,7 @@ import pytest
 
 def test_ParkWon_B():
     '''
-    tests the covering provided in Park-Won for the degree 4.
+    tests the covering provided in [PW16]_ for the degree 4.
     '''
     S = Surface(4)
     
@@ -20,7 +20,7 @@ def test_ParkWon_B():
 
 def test_Perepechko_B0():
     '''
-    tests the covering provided in Perepechko-2013 for the degree 4 on the anticanonical divisor.
+    tests the covering provided in [Pe13]_ for the degree 4 on the anticanonical divisor.
     '''
     S = Surface(4)
     C = [S.L - S.E[(i+1)%5] - S.E[(i+3)%5] for i in range(5)]

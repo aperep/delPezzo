@@ -4,7 +4,7 @@ from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
 
 def test_Perepechko2020():
     '''
-    tests the coverings provided in Perepechko, 2020 for the degree 3.
+    tests the coverings provided in [Pe20]_ for the degree 3.
     '''
     S = Surface(3)
     

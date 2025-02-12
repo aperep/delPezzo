@@ -4,7 +4,7 @@ from delPezzo import Surface, CylinderList, CylinderGenerator
 
 def test_Perepechko2013():
     '''
-    tests the covering provided in Perepechko, 2013 for the degree 5.
+    tests the covering provided in [Pe13]_ for the degree 5.
     '''
     S = Surface(5)
     cylinders = CylinderList(list(CylinderGenerator.all_cylinders(S, ['lines2'])))

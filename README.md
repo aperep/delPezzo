@@ -55,12 +55,11 @@ The tests are implemented in files `tests/test_*.py` and can be mass-checked wit
 
 ## Data
 
-The file `Lubbes_list.txt' contains a list of geometric representations of weak del Pezzo surfaces from [1, Table 13].
+The file `Lubbes_list.txt' contains a list of geometric representations of weak del Pezzo surfaces from [Lub-algo, Appendix A].
 The file `Lubbes_parse.py' is a helper parser script.
 
-[1] Niels Lubbes, `Algorithms for singularities and real structures of weak
-Del Pezzo surfaces', https://arxiv.org/pdf/1302.6678.pdf
-
+[Lub-algo] Niels Lubbes, `[Algorithms for singularities and real structures of weak
+Del Pezzo surfaces](https://www.worldscientific.com/doi/abs/10.1142/S0219498813501582)',  Journal of Algebra and Its Applications, 13(05):1350158, 2014.
 ## Authorship
 
 Created by [Alexander Perepechko](https://www.hse.ru/en/staff/aperep/).

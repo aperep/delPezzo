@@ -2,7 +2,7 @@ from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
 
 
 '''
-We follow CPW
+We follow [CPW15]_
 '''
 
 S2 = Surface(2)

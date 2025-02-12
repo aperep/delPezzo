@@ -2,7 +2,7 @@ from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
 import pytest
 
 '''
-We follow CPW
+We follow [CPW15]_
 '''
 
 @pytest.mark.skip(reason="needs a rewrite")

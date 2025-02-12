@@ -13,7 +13,10 @@ from functools import cached_property
 from collections.abc import Generator, Sequence
 
 
-
+class BubbleClass:
+    '''
+    This class represents a bubble class on P^2 (or any surface in its category of blowups), see [Pe23]_ for details. 
+    '''
 
 class Surface: 
     r'''
@@ -245,6 +248,7 @@ class Surface:
         self._curve_names[curve] = name
         return curve
 
+    #TODO move to class Curve?
     def _curve_name(self, curve:'Curve') -> str:
         #print('naming curve ', curve)
         if curve in self._curve_names.keys() and curve in self.minus_one_curves+self.minus_two_curves:

@@ -6,11 +6,9 @@ S2 = Surface(2)
 
 
 '''
-this file is abandoned.
+#TODO this file is abandoned. (move to txt/)
 
-(move to txt/)
-
-The notation of Kim-Park is as follows:
+The notation of [KimPark21]_ is as follows:
 
 The anticanonical cuspidal curve is denoted by C and its singular point by p.
 The anticanonical tacnodal pair is denoted by C1, C1', and their intersection point by q.
