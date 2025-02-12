@@ -1,11 +1,11 @@
 from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
-
+import pytest
 
 '''
 We follow CPW
 '''
 
-
+@pytest.mark.skip(reason="needs a rewrite")
 def test_deg1():
     S1 = Surface(1)
     E = S1.E

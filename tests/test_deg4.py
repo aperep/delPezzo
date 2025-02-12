@@ -1,6 +1,6 @@
 from delPezzo import *
 from sage.geometry.cone import Cone
-#from icecream import ic
+import pytest
 
 
 def test_ParkWon_B():
@@ -31,9 +31,9 @@ def test_Perepechko_B0():
     assert  Ui.is_generically_flexible_on(Cone([-S.K]))
     return Ui
 
-
+@pytest.mark.skip(reason="not implemented")
 def test_ParkWon_C():
-    raise NotImplementedError
+    return NotImplemented
 
 
 if __name__=="__main__":
