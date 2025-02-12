@@ -1,11 +1,12 @@
 import re
 from typing import Generator
 from delPezzo import Surface
+from importlib import resources
 
 def generate_surfaces(degree:int) -> Generator[Surface, None, None]:
     results = []
     pattern_list = r"\[\d+(?:[ \t]*,[ \t]*\d+)+\]"
-    with open("../data/Lubbes_list.txt", "r") as file:
+    with resources.files("delPezzo").joinpath("Lubbes_list.txt").open() as file: 
         lines = file.readlines()
         for line in lines:
             index, rank, line = line.strip().split(' ',2)
@@ -32,3 +33,7 @@ def generate_surfaces(degree:int) -> Generator[Surface, None, None]:
             extra = {'Lubbes_type':root_type, 'Lubbes_basis':basis_labels, 'Lubbes_index':index}
             yield Surface(degree, collinear_triples=collinear_triples, infinitesimal_chains=infinitesimal_chains, sixs_on_conic=sixs_on_conic, cusp_cubics=cusp_cubics, extra=extra)
                 
+
+if __name__ == "__main__":
+    for surface in generate_surfaces(5):
+        print(surface)
