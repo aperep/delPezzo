@@ -44,7 +44,7 @@ class Cylinder:
         We draw lines through image of e and image of one of E, for each of E.
         '''
         L = S.Line(E)
-        complement = E+[L-e-f for f in E if f!=e]
+        complement = list(E) + [L-e-f for f in E if f!=e]
         return cls.make(S, complement, complement, L-e, construction='lines', transversal=False)
 
     @classmethod
@@ -60,7 +60,7 @@ class Cylinder:
         lines = [L-e1-e2, L-e3-e4]
         for l in lines:
             l.set_immutable()
-        complement = E + [L-e1-e2, L-e3-e4] + [L-e for e in others]
+        complement = list(E) + [L-e1-e2, L-e3-e4] + [L-e for e in others]
         return cls.make(S, complement, complement, L, basepoint=Point(frozenset(lines)), construction='lines2', transversal = False)
 
     @classmethod
@@ -83,7 +83,7 @@ class Cylinder:
         L = S.Line(E)
         tangent = L - sum(e for e in E_on_tangent)
         conic = 2*L - sum(e for e in E_on_conic)
-        support = E + [conic, tangent] + [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
+        support = list(E) + [conic, tangent] + [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
 
         # checks if there are at least two tangents through a given point. 
         two_tangents_through_point = len(E_on_tangent)<=1 and all(len(E_on_fiber)<=1 for E_on_fiber in E_on_fibers)<=1
@@ -95,7 +95,7 @@ class Cylinder:
         two_tangents_with_fiber_through_two_points = len(E_on_tangent)==0 and len(special_fibers)<=1 and all(len(E_on_fiber)<=2 for E_on_fiber in special_fibers)
 
         if two_tangents_through_point or two_tangents_with_fiber_through_two_points:            
-            complement = E + [conic]
+            complement = list(E) + [conic]
             transversal = True
         else:
             complement = support
@@ -639,9 +639,8 @@ class CylinderGenerator:
                         yield Cylinder.make_type_cuspcubic(S, E, E_small)
 
     @classmethod
-    def all_cylinders(cls, S, constructions):
-        # TODO adapt the size of E for arbitrary degree
-        for E in S.disjoint_subsets(S.minus_one_curves):
+    def all_cylinders(cls, S: Surface, constructions: list[str]) -> Generator[Cylinder, None, None]:
+        for contraction in S.contractions_P2():
             for construction in constructions:
-                yield from cls.cylinders(S, E, construction)
+                yield from cls.cylinders(S, contraction.E, construction)
     

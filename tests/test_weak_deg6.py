@@ -1,4 +1,4 @@
-from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone
+from delPezzo import Surface, CylinderList, Cylinder, NE_SubdivisionCone, WeakDependencies
 
 
 '''
@@ -8,7 +8,7 @@ We follow Perepechko 2023
 S1 = Surface(6, )
 
 def test_deg6_weak_1():
-    S = Surface(6, collinear_triples=[[1,2,0]])
+    S = Surface(6, dependencies=WeakDependencies(collinear_triples=[[1,2,0]]))
     cylinder = Cylinder.make(S, 
                     complement=S.E,
                     support=S.E + [S.L-e for e in S.E],
@@ -21,7 +21,7 @@ def test_deg6_weak_1():
 
 
 def test_deg6_weak_2():
-    S = Surface(6, infinitesimal_chains=[[0,1]])
+    S = Surface(6, dependencies=WeakDependencies(infinitesimal_chains=[[0,1]]))
     E = S.E
     L = S.L
     # a-e are exceptional curves that comprise a zigzag

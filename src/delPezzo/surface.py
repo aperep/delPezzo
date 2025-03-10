@@ -7,16 +7,109 @@ from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_ray
 from sage.combinat.root_system.cartan_matrix import  CartanMatrix
 from sage.quadratic_forms.quadratic_form import QuadraticForm
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import itertools
 from functools import cached_property
 from collections.abc import Generator, Sequence
+from typing import Optional
+
+@dataclass
+class WeakDependencies:
+    '''
+    This class represents dependencies of blowup points for a weak del Pezzo surface obtained from P^2, see [Pe23]_ for details. The numeration of points starts from 0.            
+
+    INPUT: 
+            - ``collinear_triples`` -- indices of triples of collinear blown up points.
+            - ``infinitesimal_chains`` -- indices of chains of infinitely near blown up points. The next point in the chain is blown up infinitely near to the previous one. 
+            - ``sixs_on_conic`` -- six-tuples of indices for six points on a conic if present.
+            - ``cusp_cubics`` -- list of indices i for each cuspidal cubic 3*L-E_0-...-E_7-E_i in degree 1 
+    
+    '''
+    collinear_triples: list[list[int]] = field(default_factory=list)
+    infinitesimal_chains: list[list[int]] = field(default_factory=list)
+    sixs_on_conic: list[list[int]] = field(default_factory=list)
+    cusp_cubics: list[int] = field(default_factory=list)
+
+    def is_trivial(self):
+        '''
+        return False if surface is not weak
+        '''
+        return len(self.collinear_triples)+len(self.infinitesimal_chains)+len(self.sixs_on_conic)+len(self.cusp_cubics)==0
+    
+    def degree_estimate(self):
+        '''
+        return maximal possible degree of the corresponding weak surface based on indices of mentioned points 
+        '''
+        list_to_flatten = self.collinear_triples + self.infinitesimal_chains + self.sixs_on_conic
+        N_points = max([max(chain, default=-1) for chain in list_to_flatten], default=-1)+1 # 0 points for empty lists
+        if len(self.cusp_cubics) > 0:
+            N_points = max(N_points, 8)
+        return 9 - N_points
 
 
-class BubbleClass:
-    '''
-    This class represents a bubble class on P^2 (or any surface in its category of blowups), see [Pe23]_ for details. 
-    '''
+    def is_valid(self):
+        if self.degree_estimate() < 1:
+            return False
+        triples, chains, conics = self.collinear_triples, self.infinitesimal_chains, self.sixs_on_conic
+        degree = self.degree_estimate()
+
+        if degree <1:
+            return False
+
+        for triple in triples:
+            if  len(triple) != 3 or len(set(triple)) != 3:
+                return False
+
+        # two lines intersect only by one point
+        for triple1, triple2 in itertools.combinations(triples, 2):
+            if len(set(triple1).intersection(set(triple2)))>1:
+                return False
+
+        # chains do not have duplicate entries
+        if len(set(i for chain in chains for i in chain)) != sum(len(chain) for chain in chains):
+            return False
+        
+        # line can contain only a prefix sublist of a chain
+        for triple in triples:
+            for chain in chains:
+                if not self._point_line_and_chain_meet_correctly(triple, chain):
+                    return False
+        
+        for six in conics:
+            for triple in triples:
+                if all(p in six for p in triple):
+                    return False
+
+        for six1, six2 in itertools.combinations(conics, 2):
+            if len([p in six1 for p in six2]) >= 5:
+                return False
+        
+        if degree<=2:
+            raise NotImplementedError
+        
+        return True
+
+    @classmethod
+    def _point_line_and_chain_meet_correctly(cls, triple, chain):
+        intersection = [i for i in chain if i in triple]
+        return all(intersection[i] == chain[i] for i in range(len(intersection)))
+
+
+    def __repr__(self):
+        text = ""
+        if self.collinear_triples:
+            text += f",\n collinear_triples: {self.collinear_triples}"
+        if self.infinitesimal_chains:
+            text += f", infinitesimal_chains: {self.infinitesimal_chains}"
+        if self.cusp_cubics:
+            text += f", cusp_cubics: {self.cusp_cubics}"
+        return text
+
+
+# class BubbleCycle:
+#     '''
+#     This class represents a bubble cycle on P^2 (or any surface in its category of blowups), see [Pe23]_ for details. 
+#     '''
 
 class Surface: 
     r'''
@@ -41,20 +134,15 @@ class Surface:
         sage: collection = CylinderList(cylinders)
         sage: covering = collection.make_polar_on(cone).reduce()
     '''
-    def __init__(self, degree:int, collinear_triples:list[list[int]]|None=None, infinitesimal_chains:list[list[int]]|None=None, sixs_on_conic:list[list[int]]|None=None, cusp_cubics:list[int]|None=None, extra:dict[str,str]|None=None) -> None:
+    def __init__(self, degree:int, dependencies: WeakDependencies|None=None, extra:dict[str,str]|None=None) -> None:
         '''
-            Initializes a Surface object with the given degree and optional extra data.
+            Initialize a Surface object with the given degree and optional extra data.S
 
-        Args:
-            degree: An integer between 1 and 9, inclusive, representing the degree of the del Pezzo surface.
-            extra: Optional data to be used in the initialization of non-generic surfaces. The following keys are supported:
-            - 'tacnodal_curves': An even integer between 0 and 24, inclusive, representing the number of tacnodal curves. Can be used for the surfaces of degree 2, defaults to zero.
-            
-            For the following optional parameters note that numeration of points starts from 0.
-            collinear_triples: indices of triples of collinear blown up points.
-            infinitesimal_chains: indices of chains of infinitely near blown up points. The next point in the chain is blown up infinitely near to the previous one. 
-            sixs_on_conic: six-tuples of indices for six points on a conic if present.
-            cusp_cubics: list of indices i for each cuspidal cubic 3*L-E_0-...-E_7-E_i in degree 1 
+        INPUT:
+            - ``degree`` -- An integer between 1 and 9, inclusive, representing the degree of the del Pezzo surface.
+            - ``dependencies`` -- the dependencies (i.e., (-2)-curves) of blowup points representing this surface as the blowup of P2.
+            - ``extra`` -- Optional data to be used in the initialization of non-generic surfaces. The following keys are supported:
+            - ``tacnodal_curves`` -- An even integer between 0 and 24, inclusive, representing the number of tacnodal curves. Can be used for the surfaces of degree 2, defaults to zero.
         '''
         if degree<1  or degree>9 :
             raise ValueError("degree must be between 1 and 9")
@@ -67,68 +155,26 @@ class Surface:
                 self.tacnodal_curves = int(self.extra['tacnodal_curves'])
             else:
                 self.tacnodal_curves = 0 
-        self.collinear_triples = collinear_triples if  collinear_triples!=None else []
-        self.infinitesimal_chains = infinitesimal_chains if  infinitesimal_chains!=None else []
-        self.sixs_on_conic = sixs_on_conic if sixs_on_conic!=None else []
-        self.cusp_cubics = cusp_cubics if cusp_cubics!=None else []
-        self.is_weak = len(self.collinear_triples)+len(self.infinitesimal_chains)+len(self.sixs_on_conic)+len(self.cusp_cubics)>0
+
+        self.dependencies = dependencies or WeakDependencies()
+        assert self.dependencies.is_valid()
+        self.is_weak = not self.dependencies.is_trivial()
+        assert degree <= self.dependencies.degree_estimate()
         blowups = 9  - degree
         self.degree = degree
-        if self.is_weak:
-            self.check_point_configuration()
 
         self.N = ToricLattice(blowups + 1 )
-        self.K = self.N([-3] + [1]*blowups) # canonical divisor TODO express in L, E
         E = identity_matrix(QQ, blowups+1 )[:,1:].columns() 
         # E is the set of exceptional curves, so the basis is L, E[0], .. , E[n_blowups-1]
         self.E = [self.N(e) for e in E]
+        self.L = self.N([1] + [0]*blowups)
+        self.K = self.N([-3] + [1]*blowups) # canonical divisor
         for e in self.E:
             e.set_immutable()
-        self.L = self.Line(self.E)
         self.Q = diagonal_matrix([1] + blowups*[-1])
 
         from .cone import NE_SubdivisionCone
         self.NE = NE_SubdivisionCone.NE(self)
-
-    def check_point_configuration(self):
-        if not self.__class__._check_weak_relations(self.collinear_triples, self.infinitesimal_chains, self.sixs_on_conic, self.degree):
-            return False
-
-    @classmethod
-    def _check_weak_relations(cls, triples, chains, conics, degree):
-        for triple in triples:
-            assert len(triple) == 3
-            assert len(set(triple)) == 3
-            assert set(triple).issubset(range(9-degree))
-
-        # two lines intersect only by one point
-        for triple1, triple2 in itertools.combinations(triples, 2):
-            assert len(set(triple1).intersection(set(triple2)))<=1
-
-        assert set(i for triple in triples for i in triple).issubset(range(9-degree))
-        
-        # chains do not have duplicate entries
-        assert len(set(i for chain in chains for i in chain)) == sum(len(chain) for chain in chains) 
-        
-        # line can contain only a prefix sublist of a chain
-        for triple in triples:
-            for chain in chains:
-                cls._point_line_and_chain_meet_correctly(triple, chain)
-        
-        for six in conics:
-            for triple in triples:
-                assert not all(p in six for p in triple)
-
-        for six1, six2 in itertools.combinations(conics, 2):
-            assert len([p in six1 for p in six2]) < 5
-        
-        if degree<=2:
-            raise NotImplementedError
-
-    @classmethod
-    def _point_line_and_chain_meet_correctly(cls, triple, chain):
-        intersection = [i for i in chain if i in triple]
-        return all(intersection[i] == chain[i] for i in range(len(intersection)))
 
     def singularity_type(self):
         if len(self.minus_two_curves)==0:
@@ -136,50 +182,51 @@ class Surface:
         T = CartanMatrix(-self.gram_matrix(self.minus_two_curves))
         return T.cartan_type()
 
-    
+    #TODO test that blowups give exactly Lubbes' list except P1xP1
     def blowups(self):
         if self.degree<=3:
             raise NotImplementedError
         p = 9-self.degree
         
-        cls = self.__class__
+        deps = self.dependencies
         #lines = [line for line in lines if all(cls._point_line_and_chain_align(line, chain) for chain in self.infinitesimal_chains)]
         
         #listing all possibilities for infinitesimal_chains after adding a new point
-        new_chains_variants = [self.infinitesimal_chains]
-        for i in range(len(self.infinitesimal_chains)):
-            new_chain = self.infinitesimal_chains[i] + [p]
-            if all(cls._point_line_and_chain_meet_correctly(line, new_chain) for line in self.collinear_triples):
-                new_chains_variants.append(self.infinitesimal_chains[:i] + [new_chain] + self.infinitesimal_chains[i+1:])
-        union_of_chains = [i for chain in self.infinitesimal_chains for i in chain]
+        new_chains_variants = [deps.infinitesimal_chains]
+        for i in range(len(deps.infinitesimal_chains)):
+            new_chain = deps.infinitesimal_chains[i] + [p]
+            if all(deps._point_line_and_chain_meet_correctly(line, new_chain) for line in deps.collinear_triples):
+                new_chains_variants.append(deps.infinitesimal_chains[:i] + [new_chain] + deps.infinitesimal_chains[i+1:])
+        union_of_chains = [i for chain in deps.infinitesimal_chains for i in chain]
         for i in range(9-self.degree):
             if i in union_of_chains:
                 continue
             new_chain = [[i,p]]
-            if all(cls._point_line_and_chain_meet_correctly(line, new_chain) for line in self.collinear_triples):
-                new_chains_variants.append(self.infinitesimal_chains+new_chain)
+            if all(deps._point_line_and_chain_meet_correctly(line, new_chain) for line in deps.collinear_triples):
+                new_chains_variants.append(deps.infinitesimal_chains+new_chain)
 
 
         possible_new_conics = [list(five) +[p] for five in itertools.combinations(range(9-self.degree),5)]
-        possible_new_conics = [six for six in possible_new_conics if all(len(set(six).intersection(set(six2))) < 5 for six2 in self.sixs_on_conic)]
+        possible_new_conics = [six for six in possible_new_conics if all(len(set(six).intersection(set(six2))) < 5 for six2 in deps.sixs_on_conic)]
 
         # pairs of points which are not contained in an existing line
         candidate_pairs = [[i,j] for i,j in itertools.combinations(range(9-self.degree),2)  
-                        if all(i not in line or j not in line for line in self.collinear_triples)]
+                        if all(i not in line or j not in line for line in deps.collinear_triples)]
         for chains in new_chains_variants:
             # pairs i,j such that a new line (i,j,p) is ok with chains
-            pairs = [pair for pair in candidate_pairs if all(cls._point_line_and_chain_meet_correctly(pair+[p], chain) for chain in chains)]
+            pairs = [pair for pair in candidate_pairs if all(deps._point_line_and_chain_meet_correctly(pair+[p], chain) for chain in chains)]
             # choose disjoint subsets of pairs so that lines do not coincide
             pair_sets = itertools.chain.from_iterable(itertools.combinations(pairs,r) for r in range(len(pairs)+1))
             for pair_set in pair_sets:
                 if all(set(a).isdisjoint(b) for a,b in itertools.combinations(pair_set,2)): # if pair_set is disjoint
                     chosen_lines = [pair+[p] for pair in pair_set]
-                    new_collinear_triples = self.collinear_triples+chosen_lines
+                    new_collinear_triples = deps.collinear_triples+chosen_lines
                     conics_candidates = [six for six in possible_new_conics if all(not set(triple).issubset(set(six)) for triple in new_collinear_triples)]
                     conic_subsets = itertools.chain.from_iterable(itertools.combinations(conics_candidates, r) for r in range(len(conics_candidates)+1))
                     for conic_subset in conic_subsets:
                         if all(len(set(six1).intersection(set(six2))) < 5 for six1, six2 in itertools.combinations(conic_subset, 2)):
-                            yield Surface(self.degree-1, collinear_triples=new_collinear_triples, infinitesimal_chains=chains, sixs_on_conic=self.sixs_on_conic+list(conic_subset))
+                            new_deps = WeakDependencies(collinear_triples=new_collinear_triples, infinitesimal_chains=chains, sixs_on_conic=deps.sixs_on_conic+list(conic_subset))
+                            yield Surface(self.degree-1, dependencies=new_deps)
             
 
     #def contract_minus_one_curves(self, curve:ToricLatticeElement) -> :
@@ -209,15 +256,18 @@ class Surface:
     #             maximal_only=maximal_only
     #         )
 
+    def standard_contraction(self) -> 'Contraction':
+        standard_contraction_lines = [e for e in self.minus_one_curves + self.minus_two_curves if self.dot(e, self.L) == 0]
+        return Contraction(self, standard_contraction_lines)
+
+
     def contractions_P2(self) -> Generator['Contraction', None, None]:
-        for subset_to_contract in itertools.combinations(self.minus_one_curves+self.minus_two_curves, 9-self.degree):
-            try:
-                contraction = Contraction(self, subset_to_contract)
-            except AssertionError:
-                continue
-            if contraction.is_valid():
-                assert contraction.is_maximal()
-                yield contraction
+        for minus_one_curves_to_contract in self.disjoint_subsets(self.minus_one_curves):
+            for minus_two_curves_to_contract in itertools.combinations(self.minus_two_curves, 9-self.degree-len(minus_one_curves_to_contract)):
+                contraction = Contraction.make_valid_contraction(self, minus_one_curves_to_contract+list(minus_two_curves_to_contract))
+                if contraction != None:
+                    #assert contraction.is_maximal()
+                    yield contraction
             
 
     def dot(self, a:ToricLatticeElement, b:ToricLatticeElement) -> int:
@@ -240,7 +290,9 @@ class Surface:
         
 
     def Line(self,exceptional_curves:Sequence[ToricLatticeElement])-> ToricLatticeElement:
-        return self.N([i/3  for i in (-self.K + sum(exceptional_curves))])
+        triple_L = -self.K + sum(exceptional_curves)
+        assert all(i%3==0 for i in triple_L), f"triple line from K={self.K} and E={exceptional_curves} not divisible by 3"
+        return self.N([i/3  for i in triple_L])
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
     def _add_curve_name(self, curve:'Curve', name:str)->'Curve':
@@ -261,12 +313,12 @@ class Surface:
 
     @cached_property
     def minus_two_curves(self) -> list['Curve']:
-        collinear = [self._add_curve_name(self.L - self.E[i] - self.E[j] - self.E[k], f'L_{i+1}{j+1}{k+1}') for i,j,k in self.collinear_triples]
+        collinear = [self._add_curve_name(self.L - self.E[i] - self.E[j] - self.E[k], f'L_{i+1}{j+1}{k+1}') for i,j,k in self.dependencies.collinear_triples]
         
-        infinitesimal = [self._add_curve_name(self.E[chain[i]]-self.E[chain[i+1]], f'E_{chain[i]}{chain[i+1]}') for chain in self.infinitesimal_chains for i in range(len(chain)-1)]
+        infinitesimal = [self._add_curve_name(self.E[chain[i]]-self.E[chain[i+1]], f'E_{chain[i]}{chain[i+1]}') for chain in self.dependencies.infinitesimal_chains for i in range(len(chain)-1)]
         
-        conic = [self._add_curve_name(2*self.L - sum(self.E[i] for i in six), f'Q{"".join(i+1 for i in range(len(self.E)) if i not in six)}') for six in self.sixs_on_conic]
-        cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.cusp_cubics]
+        conic = [self._add_curve_name(2*self.L - sum(self.E[i] for i in six), f'Q{"".join(i+1 for i in range(len(self.E)) if i not in six)}') for six in self.dependencies.sixs_on_conic]
+        cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.dependencies.cusp_cubics]
         curves = collinear + infinitesimal + conic + cubic
         curves = normalize_rays(curves, self.N)
         return curves
@@ -320,41 +372,29 @@ class Surface:
     def Ample(self):
         return self.dual_cone(self.NE)
 
-    # def independent_sets(self, curves, size = None):
-    #     if size == None:
-    #         yield from self.independent_sets(curves, 9 -self.degree)
-    #         return
-    #     if size == 0 :
-    #         yield []
-    #         return
-    #     for i, v in enumerate(curves):
-    #         orthogonals = [v2 for v2 in curves[i+1 :] if self.dot(v, v2)==0 ]
-    #         for subset in self.independent_sets(orthogonals, size-1 ):
-    #             yield subset + [v]
-
-    def disjoint_subsets(self, curves:list, independent_with:list|None=None, maximal_only=True):
+    def disjoint_subsets(self, curves:list, maximal_only:bool=False) -> Generator[Curve]:
         '''
-        
+        return subsets of curves that are pairwise disjoint and disjoint with ones in independent_with
+
         EXAMPLES::
             sage: from collections import Counter
             sage: S = Surface(5)
             sage: Counter(len(s) for s in S.disjoint_subsets(S.minus_one_curves)).most_common()
             [(3, 10), (4, 5)]
         '''
-        if independent_with == None:
-            independent_with = []
-        curves = [c for c in curves if all(self.dot(c,i)==0  for i in independent_with)]
+        if maximal_only:
+            raise NotImplementedError
         if len(curves) == 0 :
             yield []
             return
-        curve = curves[-1]
-        for subset in self.disjoint_subsets(curves[:-1], independent_with=independent_with):
-            if all(self.dot(curve,c)==0  for c in subset):
-                yield subset + [curve]
-                if not maximal_only:
-                    yield subset
-            else:
-                yield subset                
+        curve = curves[0]
+        orthogonal_curves = [c for c in curves[1:] if self.dot(c,curve)==0]
+        # subsets that contain curve:
+        for subset in self.disjoint_subsets(orthogonal_curves, maximal_only=maximal_only):
+                yield [curve] + subset
+        # subsets that do not contain curve
+        yield from self.disjoint_subsets(curves[1:], maximal_only=maximal_only)
+          
 
     # def cone_representative(self, cone_type:str) -> 'NE_SubdivisionCone':
     #     return NE_SubdivisionCone.representative(self, cone_type)
@@ -366,20 +406,17 @@ class Surface:
         text = str(self)
         if self.extra:
             text += f",\n extra: {self.extra}"
-        if self.collinear_triples:
-            text += f",\n collinear_triples: {self.collinear_triples}"
-        if self.infinitesimal_chains:
-            text += f", infinitesimal_chains: {self.infinitesimal_chains}"
-        if self.cusp_cubics:
-            text += f", cusp_cubics: {self.cusp_cubics}"
+        if self.is_weak:
+            text += "\n" + str(self.dependencies)
         return text
 
     
 
 class Contraction():    
     '''
-    contracted_curves: A tuple of contracted (irreducible) curves.
-    E: a list of exceptional reducible (-1)-curves, which form an orthogonal basis of the span of the contracted curves. They are sums of chains of contracted curves ending with a (-1)-curve.
+    S: A surface that is contracted
+    contracted_curves: A tuple of contracted (irreducible) curves on S.
+    E: a list of exceptional reducible (-1)-curves, which form an orthogonal basis of the span of the contracted curves. They are sums of chains of contracted (-2)-curves ending with a (-1)-curve.
     C: a list of contracted (irreducible) curves in the same order as E.
     '''
     S:Surface
@@ -402,7 +439,7 @@ class Contraction():
         self.contracted_curves = tuple(contracted_curves)
         E=[]
         C=[]
-        assert self.is_valid(), 'contraction is not valid'
+        assert self.is_valid(), f'contraction of curves {contracted_curves} is not valid'
         for chain in self.chains_of_contracted_curves:
             for i in range(len(chain)):
                 C.append(chain[i])
@@ -452,10 +489,20 @@ class Contraction():
         return v + sum(self.S.dot(e,v)*e for e in self.E)
         #return self.S.N(self.picard_projection_matrix*v)
 
-    def is_valid(self) -> bool:
-        g = self.S.gram_matrix(self.contracted_curves)
-        q = QuadraticForm(QQ,g)
+    @classmethod
+    def is_valid_contraction(cls, S:Surface, curves_to_contract: Sequence[ToricLatticeElement]) -> bool:
+        g = S.gram_matrix(curves_to_contract)
+        q = QuadraticForm(QQ, g)
         return q.is_negative_definite() and abs(g.det())==1
+
+    @classmethod
+    def make_valid_contraction(cls, S:Surface, curves_to_contract: Sequence[ToricLatticeElement]) -> Optional['Contraction']:
+        if cls.is_valid_contraction(S, curves_to_contract):
+            return cls(S, curves_to_contract)
+        return None
+
+    def is_valid(self) -> bool:
+        return self.is_valid_contraction(self.S, self.contracted_curves)
 
     def is_maximal(self) -> bool:
         return all(self.dot(c,c)>=0 for c in 
@@ -470,7 +517,7 @@ class Contraction():
     def gram_matrix(self, rays):
         return matrix([[self.dot(a,b) for a in rays] for b in rays])
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"contraction of curves {self.contracted_curves} on {self.S}"
 
     def are_collinear(self, c1, c2, c3) -> bool:
