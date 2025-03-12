@@ -16,7 +16,7 @@ def test_cone_types(deg:int=3):
     S = Surface(deg)
     types = NE_SubdivisionCone.cone_types(S)
     for t in types:
-        assert t == NE_SubdivisionCone.representative(S,t).type, f'types {t} and {NE_SubdivisionCone.representative(S,t).type} are not same'
+        assert t == NE_SubdivisionCone.representative(S,t).type(), f'types {t} and {NE_SubdivisionCone.representative(S,t).type} are not same'
 
 
 def test_S3_tangent_covering():
@@ -24,9 +24,9 @@ def test_S3_tangent_covering():
     collection = CylinderList(CylinderGenerator.cylinders(S, S.E, 'tangent'))
     for i in range(1, 7):
         t = f'B({i})'
-        cone = NE_SubdivisionCone.representative(S, t)
+        cone = NE_SubdivisionCone.representative(S, t).cone
         assert len(collection.make_polar_on(cone).reduce())>0 
-    cone = NE_SubdivisionCone.representative(S, 'B(0)')
+    cone = NE_SubdivisionCone.representative(S, 'B(0)').cone
     assert len(collection.make_polar_on(cone).reduce())==0 
 
 def test_S3_cover_anticanonical():

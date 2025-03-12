@@ -4,6 +4,8 @@ from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_ray
 from functools import cached_property, cache
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Union
 
 from .surface import Surface
 #TODO make relint a class (dumb class over cone with set operators)
@@ -22,38 +24,52 @@ def relints_intersect(cone1: ConvexRationalPolyhedralCone, cone2: ConvexRational
     interior_ray = sum(intersection.rays())
     return cone1.relative_interior_contains(interior_ray) and cone2.relative_interior_contains(interior_ray)
 
-class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
+@dataclass#(frozen=True)
+class NE_SubdivisionCone:
     '''
     This class represents a cone obtained by subdivisions from NE and keeps the creation info.
     '''
 
+    cone: ConvexRationalPolyhedralCone
+    S: Surface
+    parent: Union['NE_SubdivisionCone' , None] = None
+    parent_face: ConvexRationalPolyhedralCone | None = None
+    parent_ray: ToricLatticeElement | None = None
+
     @classmethod
     def NE(cls, S:Surface):
-        if S.is_weak:
-            curves = S.minus_one_curves + S.minus_two_curves
-        else:
-            curves = S.minus_one_curves
-        NE = cls(curves, S.N)
-        NE.S = S
-        NE.parent = None
-        NE.parent_face = None
-        NE.parent_ray = None
-        return NE
-        
+        cone = Cone(S.minus_one_curves + S.minus_two_curves + [S.L], lattice=S.N)
+        return cls(cone=cone, S=S, parent=None, parent_face=None, parent_ray=None)
 
     @classmethod
     def from_face_and_ray(cls, parent:'NE_SubdivisionCone', face:ConvexRationalPolyhedralCone, ray:ToricLatticeElement):
-        assert face.is_face_of(parent)
-        assert face != parent
+        assert face.is_face_of(parent.cone)
+        assert face != parent.cone
         rays = list(face.rays())+[ray]
         rays = sorted(normalize_rays(rays, parent.S.N))
-        child = cls(rays, lattice=parent.S.N)
-        child.S = parent.S 
-        child.parent = parent
-        child.parent_face = face
-        child.parent_ray = ray
-        return child
+        child_cone = Cone(rays, lattice=parent.S.N)
+        ray.set_immutable()
+        return cls(cone=child_cone, S=parent.S, parent=parent, parent_face=face, parent_ray=ray)
     
+    def _members(self):
+        return (self.cone, self.S, self.parent, self.parent_face, self.parent_ray) #TODO use hash(parent) instead to avoid recursion?
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return self._members() == other._members()
+        else:
+            return False
+
+    def __hash__(self):
+        if not hasattr(self, '_hash'):
+            self._hash = hash(self._members())
+        return self._hash
+    
+    def __eq__(self, other):
+        return (self.cone, self.S, self.parent, self.parent_face, self.parent_ray) == (other.cone, other.S, other.parent, other.parent_face, other.parent_ray)
+
+    def rays(self) -> Iterable[ToricLatticeElement]:        
+        return self.cone.rays()
     
     def subdivision_faces(self, ray: ToricLatticeElement) -> Iterable[ConvexRationalPolyhedralCone]:
         '''
@@ -68,13 +84,13 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         '''
         returns the standard dividing ray of the cone depending on its type
         '''
-        match self.type:
+        match self.type():
             case 'NE':
-                return -self.S.K
+                return self.S.N(-self.S.K)
             case 'C':
-                return sum(self.parent_face.rays())
+                return self.S.N(sum(self.parent_face.rays()))
             case _:
-                return sum(self.rays())
+                return self.S.N(sum(self.rays()))
 
 
     def children(self, subdivision_ray: ToricLatticeElement | None = None)->Iterable['NE_SubdivisionCone']:
@@ -95,8 +111,8 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         returns a generator of subdivision cones whose relative interiors contain ample divisors
         
         EXAMPLES ::
-        sage: cone_C = next(c for c in Surface(5).NE.ample_children() if c.type == 'C')
-        sage: sorted(Counter(c.type for c in cone_C.ample_children()).items())
+        sage: cone_C = next(c for c in Surface(5).NE.ample_children() if c.type() == 'C')
+        sage: sorted(Counter(c.type() for c in cone_C.ample_children()).items())
         [('C(0)', 1), ('C(1)', 6), ('C(2)', 12), ('C(3)', 4), ('C(3)-P1xP1', 4)]
         '''
         if subdivision_ray == None:
@@ -115,33 +131,33 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
         # TODO convert ValueErrors into return None
         if subdivision_ray == None:
             subdivision_ray = self._subdivision_ray()
-        if not self.contains(subdivision_ray):
-            raise ValueError(f'make_child: subdivision_ray {subdivision_ray} is not contained in this cone ({self} with rays {list(self.rays())}) of type {self.type}')
-        if not face.is_face_of(self):
-            raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
+        if not self.cone.contains(subdivision_ray):
+            raise ValueError(f'make_child: subdivision_ray {subdivision_ray} is not contained in this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
+        if not face.is_face_of(self.cone):
+            raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
         cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
-        if not relint_contains_relint(self, cone):
-            raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type}')
+        if not relint_contains_relint(self.cone, cone):
+            raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type()}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
         return cone
         # should we check for containing ample divisors? maybe not 
 
     def print(self):
-        info = f'Cone of type {self.type}, rays\n{self.rays()}, on {self.S}'
+        info = f'Cone of type {self.type()}, rays\n{self.rays()}, on {self.S}'
         if self.parent != None:
-            info +=f' with parent of type {self.parent.type}, parent ray {self.parent_ray}, parent face rays {list(self.parent.rays())}.'
+            info +=f' with parent of type {self.parent.type()}, parent ray {self.parent_ray}, parent face rays {list(self.parent.rays())}.'
         return info
         
     
 
 
 
-    @cached_property
+    @cache
     def Ample(self):
         '''
         returns a cone, which relative interior consists of all ample classes in self.cone
         '''
         #TODO we assume that L is in NE, make this explicit
-        ample = self.intersection(self.S.Ample)
+        ample = self.cone.intersection(self.S.Ample)
         if self.S.Ample.relative_interior_contains(sum(ample.rays())):
             return ample
         else:
@@ -149,19 +165,19 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
 
     @property 
     def Ample2(self): # is this faster than Ample?
-        dual_rays = self.S.NE.rays() + self.S.dual_cone(self).rays()
+        dual_rays = self.S.NE.rays() + self.S.dual_cone(self.cone).rays()
         return self.S.dual_cone(Cone(dual_rays))
 
     def has_ample_divisors(self):
-        return self.Ample.dimension() > 0
+        return self.Ample().dimension() > 0
         
-    @cached_property
+    @cache
     def type(self):
         '''
         Returns the Fujita type of the parent face for children of NE.
         EXAMPLES::
             sage: from collections import Counter
-            sage: Counter(c.type for c in Surface(4).NE.ample_children()).most_common()
+            sage: Counter(c.type() for c in Surface(4).NE.ample_children()).most_common()
             [('B(3)', 160),
             ('B(2)', 80),
             ('B(4)', 80),
@@ -171,7 +187,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             ('C', 10),
             ('B(0)', 1)]
         '''
-        rank = self.dim() - 1 
+        rank = self.cone.dim() - 1 
         if self == self.S.NE:
             return 'NE'
         elif self.parent == self.S.NE and self.parent_ray == -self.S.K:
@@ -195,7 +211,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
                 all(self.S.dot(e1,e2)<=0 for e1 in E1 for e2 in E1) and len(E)==rank-1:
                 return 'C'
             return 'NE.unknown-child-3'
-        elif self.parent.type == 'C' and self.parent_ray == self.parent._subdivision_ray():
+        elif self.parent.type() == 'C' and self.parent_ray == self.parent._subdivision_ray():
             rays = list(self.parent_face.rays())
             B = self.parent_ray
             E = [r for r in rays if r in self.S.minus_one_curves]
@@ -214,7 +230,7 @@ class NE_SubdivisionCone(ConvexRationalPolyhedralCone):
             if not has_anticanonical_ray:
                 cone_type += '-no-K'
             return cone_type
-        return self.parent.type + '.unknown-child-0'
+        return self.parent.type() + '.unknown-child-0'
 
     #this method works slowly in degree 1, why?
     @classmethod 

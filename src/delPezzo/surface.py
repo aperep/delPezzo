@@ -2,7 +2,7 @@ from sage.all_cmdline import *   # import sage library, otherwise other imports 
 from sage.matrix.constructor import matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
-from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice
+from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice, ToricLatticeFactory
 from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 from sage.combinat.root_system.cartan_matrix import  CartanMatrix
 from sage.quadratic_forms.quadratic_form import QuadraticForm
@@ -12,6 +12,16 @@ import itertools
 from functools import cached_property
 from collections.abc import Generator, Sequence
 from typing import Optional
+from types import MethodType
+
+
+# def _get_immutable_element(self: ToricLatticeFactory, *args, **kwds):
+#     '''
+#     contruct a new immutable element of ``self`` 
+#     '''
+#     element = super().__call__(self, *args, **kwds)
+#     element.set_immutable()
+#     return element
 
 @dataclass
 class WeakDependencies:
@@ -117,7 +127,7 @@ class Surface:
 
     Attributes:
         degree: An integer representing the degree of the surface.
-        N: A ToricLattice object used to represent the Picard lattice of the variety.
+        N: An ToricLattice object used to represent the Picard lattice of the variety.
         K: The canonical divisor of the variety.
         E: A list of Curve (or ToricLatticeElement) objects representing the exceptional curves of the standard blowup from P^2. TODO make this a list of (maybe reducible) orthogonal (-1)-curves
         L: A Curve object representing the line class from P^2.
@@ -164,6 +174,7 @@ class Surface:
         self.degree = degree
 
         self.N = ToricLattice(blowups + 1 )
+        #self.N.__call__ = MethodType(_get_immutable_element, self.N)
         E = identity_matrix(QQ, blowups+1 )[:,1:].columns() 
         # E is the set of exceptional curves, so the basis is L, E[0], .. , E[n_blowups-1]
         self.E = [self.N(e) for e in E]
@@ -370,7 +381,7 @@ class Surface:
     #TODO refactor module to avoid usage of Ample in favor of NE through dualities. Reason is, NE has 240 rays in degree 1, and Ample has around 20k rays.
     @cached_property
     def Ample(self):
-        return self.dual_cone(self.NE)
+        return self.dual_cone(self.NE.cone)
 
     def disjoint_subsets(self, curves:list, maximal_only:bool=False) -> Generator[Curve]:
         '''

@@ -24,7 +24,7 @@ def test_Perepechko2020():
     assert representatives_where_collection_is_flexible(U4) == {'B(5)-P1xP1', 'C(5)-P1xP1'}
     assert representatives_where_collection_is_flexible(U5) == {f'C({i})' for i in range(0,4)}
 
-    C4 = NE_SubdivisionCone.representative(S, 'C(4)')
+    C4 = NE_SubdivisionCone.representative(S, 'C(4)').cone
     forb_dual_ray = S.L + S.E[-2]-2*S.E[-1]
     C4prime = S.dual_cone([forb_dual_ray,-forb_dual_ray]).intersection(C4)
     assert len(C4prime.rays()) == 5

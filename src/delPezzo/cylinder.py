@@ -292,7 +292,7 @@ class Cylinder:
         types = NE_SubdivisionCone.cone_types(self.S)
         for t in types:
             #print(f'looking at type {t}')
-            cone = NE_SubdivisionCone.representative(self.S, t)
+            cone = NE_SubdivisionCone.representative(self.S, t).cone
             if self.is_polar_on(cone):
                 if complete and not self.is_complete_on(cone):
                     continue
@@ -486,15 +486,15 @@ class CylinderList(list):
         return forb_intersection_excluded
 
 
-    def is_generically_flexible_on(self, cone, exclude=None, restrict_to_ample=True):
+    def is_generically_flexible_on(self, cone:ConvexRationalPolyhedralCone|str, exclude:ConvexRationalPolyhedralCone|str|None=None, restrict_to_ample:bool=True)->bool:
         '''
         checks if the collection provides generic flexibility for ample divisors in the provided cone
         exclude is a cone of divisors to be excluded from completeness check
         '''
         if isinstance(cone, str):
-            cone = NE_SubdivisionCone.representative(self.S, cone)
+            cone = NE_SubdivisionCone.representative(self.S, cone).cone
         if isinstance(exclude, str):
-            exclude = NE_SubdivisionCone.representative(self.S, cone)
+            exclude = NE_SubdivisionCone.representative(self.S, cone).cone
         if restrict_to_ample:
             cone = cone.intersection(self.S.Ample)
             if not relint_contains_relint(self.S.Ample, cone):
