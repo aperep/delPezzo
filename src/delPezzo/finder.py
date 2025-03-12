@@ -31,6 +31,7 @@ class Finder:
                 return ConeCovering(cone, collection, True)
         collection = self.all_cylinders.copy()
         collection.make_polar_on(cone)
+        collection = collection.reduce()
         return ConeCovering(cone, collection, collection.is_generically_flexible_on(cone))
 
     def iterate(self):
@@ -38,11 +39,11 @@ class Finder:
         subdivide cones of polarizations, where generic flexibility is not yet achieved; return True if generic flexibility is achieved
         '''
         if len(self.coverings)==0:
-            self.coverings.append(self.check_cone(self.S.Ample))
+            self.coverings.append(self.find_covering_on_cone(self.S.Ample))
         bad_coverings = [covering  for covering in self.coverings if not covering.is_generically_flexible]
         for covering in bad_coverings:
             self.coverings.remove(covering)
             for new_cone in covering.cone.subdivision():
-                self.coverings.append(self.check_cone(new_cone))
+                self.coverings.append(self.find_covering_on_cone(new_cone))
         return all(covering.is_generically_flexible for covering in self.coverings)
     

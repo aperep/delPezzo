@@ -338,6 +338,9 @@ class CylinderList(list):
     def __setitem__(self, index, item):
         super().__setitem__(index, self._validate_cylinder(item))
 
+    def copy(self)->'CylinderList':
+        return CylinderList(super().copy(), self.S)
+
     def insert(self, index, item):
         print(super(), type(self))
         super().insert(index, self._validate_cylinder(item))
@@ -413,7 +416,7 @@ class CylinderList(list):
         cone is either a Cone or a type of cone, which would be converted to a representative
         '''
         if isinstance(cone, str):
-            cone = NE_SubdivisionCone.representative(self.S, cone)
+            cone = NE_SubdivisionCone.representative(self.S, cone).cone
         cylinders = [c for c in self if c.is_polar_on(cone)]
         return CylinderList(cylinders, self.S)
 
